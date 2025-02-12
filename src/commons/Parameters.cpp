@@ -1282,6 +1282,11 @@ Parameters::Parameters():
     sortresult.push_back(&PARAM_THREADS);
     sortresult.push_back(&PARAM_V);
 
+    // Sort prefilter
+    resortprefilter.push_back(&PARAM_COMPRESSED);
+    resortprefilter.push_back(&PARAM_THREADS);
+    resortprefilter.push_back(&PARAM_V);
+
     // WORKFLOWS
     searchworkflow = combineList(align, prefilter);
     searchworkflow = combineList(searchworkflow, ungappedprefilter);
@@ -2597,7 +2602,7 @@ void Parameters::setDefaults() {
     weightThr = 0.9;
     weightFile = "";
     matchAdjacentSeq = true;
-    hashSeqBuffer = 1.05;
+    hashSeqBuffer = 2;
     numDiskBuffer = 0;
 
     // result2stats

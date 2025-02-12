@@ -214,13 +214,15 @@ public:
     }
 };
 
+template  <int TYPE, typename T, bool IncludeAdjacentSeq>
+void fillCountTable(KmerPosition<T, IncludeAdjacentSeq> *kmers, size_t splitKmerCount, std::vector<unsigned int> &countTable);
 
 template  <int TYPE, typename T>
 size_t assignGroup(KmerPosition<T, false> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr,
-                   SequenceWeights * sequenceWeights, float weightThr, BaseMatrix *subMat, float &hashSeqBuffer, std::string tmpFile, int &numDiskBuffer);
+                   SequenceWeights * sequenceWeights, float weightThr, BaseMatrix *subMat, float &hashSeqBuffer, std::string tmpFile, int &numDiskBuffer, std::vector<unsigned int> countTable);
 template  <int TYPE, typename T>
 size_t assignGroup(KmerPosition<T, true> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr,
-                   SequenceWeights * sequenceWeights, float weightThr, BaseMatrix *subMat, float &hashSeqBuffer, std::string tmpFile, int &numDiskBuffer);
+                   SequenceWeights * sequenceWeights, float weightThr, BaseMatrix *subMat, float &hashSeqBuffer, std::string tmpFile, int &numDiskBuffer, std::vector<unsigned int> countTable);
 
 template <int TYPE, typename T>
 void mergeKmerFilesAndOutput(DBWriter & dbw, std::vector<std::string> tmpFiles, std::vector<char> &repSequence);

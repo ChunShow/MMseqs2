@@ -1196,6 +1196,7 @@ public:
     std::vector<MMseqsParameter*> expand2profile;
     std::vector<MMseqsParameter*> pairaln;
     std::vector<MMseqsParameter*> sortresult;
+    std::vector<MMseqsParameter*> resortprefilter;
     std::vector<MMseqsParameter*> enrichworkflow;
     std::vector<MMseqsParameter*> databases;
     std::vector<MMseqsParameter*> tar2db;

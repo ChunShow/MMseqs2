@@ -1,7 +1,7 @@
 // include xxhash early to avoid incompatibilites with SIMDe
 #define XXH_INLINE_ALL
 #include "xxhash.h"
-
+#include <chrono>
 #include "kmermatcher.h"
 #include "Debug.h"
 #include "Indexer.h"
@@ -452,6 +452,37 @@ template void swapCenterSequence<0, int, true>(KmerPosition<int, true> *kmers, s
 template void swapCenterSequence<1, short, true>(KmerPosition<short, true> *kmers, size_t splitKmerCount, SequenceWeights &seqWeights);
 template void swapCenterSequence<1, int, true>(KmerPosition<int, true> *kmers, size_t splitKmerCount, SequenceWeights &seqWeights);
 
+template  <int TYPE, typename T, bool IncludeAdjacentSeq>
+void fillCountTable(KmerPosition<T, IncludeAdjacentSeq> *hashSeqPair, size_t totalKmers, std::vector<unsigned int> &countTable) {
+    
+    size_t prevHash = hashSeqPair[0].kmer;
+    size_t prevHashStart = 0;
+    unsigned int prevSetSize = 0;
+    for (size_t elementIdx = 0; elementIdx < totalKmers; elementIdx++) {
+        size_t currKmer = hashSeqPair[elementIdx].kmer;
+        if (prevHash != currKmer) {
+            for (size_t i = prevHashStart; i < elementIdx; i++) {
+                size_t id =  static_cast<size_t>(hashSeqPair[i].id);
+                countTable[id] += prevSetSize;
+            }
+            if (currKmer == SIZE_T_MAX) break;
+            prevHash = currKmer;
+            prevHashStart = elementIdx;
+            prevSetSize = 0;
+        }
+        prevSetSize++;
+    }
+}
+
+template void fillCountTable<0, short, false>(KmerPosition<short, false> *kmers, size_t splitKmerCount, std::vector<unsigned int> &countTable);
+template void fillCountTable<0, int, false>(KmerPosition<int, false> *kmers, size_t splitKmerCount, std::vector<unsigned int> &countTable);
+template void fillCountTable<1, short, false>(KmerPosition<short, false> *kmers, size_t splitKmerCount, std::vector<unsigned int> &countTable);
+template void fillCountTable<1, int, false>(KmerPosition<int, false> *kmers, size_t splitKmerCount, std::vector<unsigned int> &countTable);
+template void fillCountTable<0, short, true>(KmerPosition<short, true> *kmers, size_t splitKmerCount, std::vector<unsigned int> &countTable);
+template void fillCountTable<0, int, true>(KmerPosition<int, true> *kmers, size_t splitKmerCount, std::vector<unsigned int> &countTable);
+template void fillCountTable<1, short, true>(KmerPosition<short, true> *kmers, size_t splitKmerCount, std::vector<unsigned int> &countTable);
+template void fillCountTable<1, int, true>(KmerPosition<int, true> *kmers, size_t splitKmerCount, std::vector<unsigned int> &countTable);
+
 template <typename T, bool IncludeAdjacentSeq>
 void resizeBuffer(size_t totalKmers, size_t hashStartRange, size_t hashEndRange, DBReader<unsigned int> & seqDbr, 
                    Parameters & par, BaseMatrix * subMat) {
@@ -487,11 +518,13 @@ void resizeBuffer(size_t totalKmers, size_t hashStartRange, size_t hashEndRange,
         }
     }
 
-    std::string splitFile = "None";
+    // dummmy variables
+    std::string splitFile = "Resize";
+    std::vector<unsigned int> countTable;
     if(Parameters::isEqualDbtype(seqDbr.getDbtype(), Parameters::DBTYPE_NUCLEOTIDES)){
-        assignGroup<Parameters::DBTYPE_NUCLEOTIDES, T>(hashSeqPair, totalKmers, par.includeOnlyExtendable, par.covMode, par.covThr, sequenceWeights, par.weightThr, subMat, par.hashSeqBuffer, splitFile, par.numDiskBuffer);
+        assignGroup<Parameters::DBTYPE_NUCLEOTIDES, T>(hashSeqPair, totalKmers, par.includeOnlyExtendable, par.covMode, par.covThr, sequenceWeights, par.weightThr, subMat, par.hashSeqBuffer, splitFile, par.numDiskBuffer, countTable);
     }else{
-        assignGroup<Parameters::DBTYPE_AMINO_ACIDS, T>(hashSeqPair, totalKmers, par.includeOnlyExtendable, par.covMode, par.covThr, sequenceWeights, par.weightThr, subMat, par.hashSeqBuffer, splitFile, par.numDiskBuffer);
+        assignGroup<Parameters::DBTYPE_AMINO_ACIDS, T>(hashSeqPair, totalKmers, par.includeOnlyExtendable, par.covMode, par.covThr, sequenceWeights, par.weightThr, subMat, par.hashSeqBuffer, splitFile, par.numDiskBuffer, countTable);
     }
     Debug(Debug::INFO) << "Time for resizing: " << timer.lap() << "\n\n";
 
@@ -540,13 +573,23 @@ KmerPosition<T, IncludeAdjacentSeq> * doComputation(size_t &totalKmers, size_t h
         }
     }
 
+    std::vector<unsigned int> countTable;
+    if (IncludeAdjacentSeq){
+        for (size_t i = 0; i < seqDbr.getSize(); i++) countTable.push_back(0);
+        if(Parameters::isEqualDbtype(seqDbr.getDbtype(), Parameters::DBTYPE_NUCLEOTIDES)){
+            fillCountTable<Parameters::DBTYPE_NUCLEOTIDES, T, IncludeAdjacentSeq>(hashSeqPair, totalKmers, countTable);
+        }else{
+            fillCountTable<Parameters::DBTYPE_AMINO_ACIDS, T, IncludeAdjacentSeq>(hashSeqPair, totalKmers, countTable);
+        }
+    }
+
     // assign rep. sequence to same kmer members
     // The longest sequence is the first since we sorted by kmer, seq.Len and id
     size_t writePos;
     if(Parameters::isEqualDbtype(seqDbr.getDbtype(), Parameters::DBTYPE_NUCLEOTIDES)){
-        writePos = assignGroup<Parameters::DBTYPE_NUCLEOTIDES, T>(hashSeqPair, totalKmers, par.includeOnlyExtendable, par.covMode, par.covThr, sequenceWeights, par.weightThr, subMat, par.hashSeqBuffer, splitFile, par.numDiskBuffer);
+        writePos = assignGroup<Parameters::DBTYPE_NUCLEOTIDES, T>(hashSeqPair, totalKmers, par.includeOnlyExtendable, par.covMode, par.covThr, sequenceWeights, par.weightThr, subMat, par.hashSeqBuffer, splitFile, par.numDiskBuffer, countTable);
     }else{
-        writePos = assignGroup<Parameters::DBTYPE_AMINO_ACIDS, T>(hashSeqPair, totalKmers, par.includeOnlyExtendable, par.covMode, par.covThr, sequenceWeights, par.weightThr, subMat, par.hashSeqBuffer, splitFile, par.numDiskBuffer);
+        writePos = assignGroup<Parameters::DBTYPE_AMINO_ACIDS, T>(hashSeqPair, totalKmers, par.includeOnlyExtendable, par.covMode, par.covThr, sequenceWeights, par.weightThr, subMat, par.hashSeqBuffer, splitFile, par.numDiskBuffer, countTable);
     }
 
     delete sequenceWeights;
@@ -580,7 +623,8 @@ KmerPosition<T, IncludeAdjacentSeq> * doComputation(size_t &totalKmers, size_t h
 
 template <int TYPE, typename T>
 size_t assignGroup(KmerPosition<T, false> *hashSeqPair, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr,
-                   SequenceWeights *sequenceWeights, float weightThr, BaseMatrix *, float &, std::string, int &) {
+                   SequenceWeights *sequenceWeights, float weightThr, BaseMatrix *, float &, std::string, int &, std::vector<unsigned int>) {
+    auto start = std::chrono::high_resolution_clock::now();
 
     size_t writePos=0;
     size_t prevHash = hashSeqPair[0].kmer;
@@ -693,15 +737,22 @@ size_t assignGroup(KmerPosition<T, false> *hashSeqPair, size_t splitKmerCount, b
             prevHash = BIT_SET(prevHash, 63);
         }
     }
+    Debug(Debug::INFO) << "\nTotal: " << writePos << "\n\n";
+    auto end = std::chrono::high_resolution_clock::now();
 
+    // 경과 시간 계산 (밀리초 단위)
+    std::chrono::duration<double> elapsed = end - start;
+    
+    std::cout << "Elapsed time: " << elapsed.count() << " s\n";
     return writePos;
 }
 
 template <int TYPE, typename T>
 size_t assignGroup(KmerPosition<T, true> *hashSeqPair, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr,
-                   SequenceWeights *sequenceWeights, float weightThr, BaseMatrix *subMat, float &hashSeqBuffer, std::string tmpFile, int &numDiskBuffer) {
-
+                   SequenceWeights *sequenceWeights, float weightThr, BaseMatrix *subMat, float &hashSeqBuffer, std::string tmpFile, int &numDiskBuffer, std::vector<unsigned int> countTable) {
+    auto start = std::chrono::high_resolution_clock::now();
     size_t totalSplitKmerCount = splitKmerCount;
+    Debug(Debug::INFO) << "\nTotal: " << splitKmerCount << "\n\n";
     // change splitKmerCount to exclude additional memory
     splitKmerCount = static_cast<size_t>(splitKmerCount / hashSeqBuffer);
     // declare variables
@@ -722,11 +773,13 @@ size_t assignGroup(KmerPosition<T, true> *hashSeqPair, size_t splitKmerCount, bo
     T repSeq_i_pos;
     unsigned char repAdjacent[6];
     // modulate # of rep seq selected in same kmer groups
-    size_t repSeqNum = 20;
+    size_t repSeqNum = 1;
+    size_t extraRepSepNum = 0;
+    size_t totalAssign = 0;
 
     for (size_t elementIdx = 0; elementIdx < splitKmerCount+1; elementIdx++) {
         // Reallocate module
-        if (tmpFile == "None" && elementIdx == static_cast<size_t>(splitKmerCount / 10)) {
+        if (tmpFile == "Resize" && elementIdx == static_cast<size_t>(splitKmerCount / 10)) {
             hashSeqBuffer = 1.05 + (static_cast<float>(writeTmp) / static_cast<float>(splitKmerCount)) * 11;
             return SIZE_T_MAX;
         }
@@ -737,23 +790,35 @@ size_t assignGroup(KmerPosition<T, true> *hashSeqPair, size_t splitKmerCount, bo
         }
         if (prevHash != currKmer) {
             size_t repIdx = prevHashStart;
+            std::vector<unsigned int> repSeqIds;
+            std::vector<unsigned int> extraRepIndices;
+            size_t extraSearchCount = 0;
+            size_t startHash = prevHashStart;
             for (size_t k = 0; k < repSeqNum; k++) {
                 // initialize variables
+                bool check = true;
                 repSeqId = hashSeqPair[repIdx].id;
                 if (TYPE == Parameters::DBTYPE_NUCLEOTIDES) {
                     repIsReverse = (BIT_CHECK(hashSeqPair[repIdx].kmer, 63) == 0);
                     repSeqId = (repIsReverse) ? repSeqId : BIT_SET(repSeqId, 63);
                 }
+                repSeqIds.push_back(repSeqId);
                 queryLen = hashSeqPair[repIdx].seqLen;
                 repSeq_i_pos = hashSeqPair[repIdx].pos;
                 for (size_t i = 0; i < 6; i++) {
                     repAdjacent[i] = hashSeqPair[repIdx].getAdjacentSeq(i);
                 }
-                int matchIdx = 0;
+                // for (size_t i = 6*k; i < 6*(k+1); i++) {
+                //     repAdjacent[i] = hashSeqPair[repIdx].getAdjacentSeq(i%6);
+                // }
+                int matchScore = 0;
                 for (size_t n = 0; n < 6; n++) {
-                    matchIdx += subMat->subMatrix[repAdjacent[n]][repAdjacent[n]];
+                    matchScore += subMat->subMatrix[repAdjacent[n]][repAdjacent[n]];
                 }
-                int matchThreshold = matchIdx;
+                // for (size_t n = 0; n < 6*(k+1); n++) {
+                //     matchScore += subMat->subMatrix[repAdjacent[n]][repAdjacent[n]];
+                // }
+                int matchThreshold = matchScore;
 
                 for (size_t i = prevHashStart; i < elementIdx; i++) {
                     // skip target sequences if weight > weightThr
@@ -809,16 +874,62 @@ size_t assignGroup(KmerPosition<T, true> *hashSeqPair, size_t splitKmerCount, bo
                         bool canBecovered = Util::canBeCovered(covThr, covMode,
                                                             static_cast<float>(queryLen),
                                                             static_cast<float>(hashSeqPair[i].seqLen));
-                        int matchCount = 0;
-                        for (size_t n = 0; n < 6; n++) {
-                            matchCount += subMat->subMatrix[repAdjacent[n]][hashSeqPair[i].getAdjacentSeq(n)];
+                        // use countTable for selection of next Rep seqs, excepting for resizing
+                        if (tmpFile != "Resize" && k == 0 && extraRepSepNum != 0) {
+                            bool isNew = true;
+                            for (size_t n = 0; n < extraRepIndices.size(); n++) {
+                                if (countTable[hashSeqPair[extraRepIndices[n]].id] == countTable[hashSeqPair[i].id]) {
+                                    isNew = false;
+                                    break;
+                                }
+                            }
+                            if (isNew) {
+                                if (extraRepIndices.size() < extraRepSepNum) {
+                                    extraRepIndices.push_back(i);
+                                }
+                                else if (extraRepIndices.size() == extraRepSepNum) {
+                                    unsigned int minIdx = 0;
+                                    for (size_t n = 1; n < extraRepIndices.size(); n++) {
+                                        unsigned int currentCount = countTable[hashSeqPair[extraRepIndices[n]].id];
+                                        unsigned int minCount = countTable[hashSeqPair[extraRepIndices[minIdx]].id];
+                                        if (currentCount < minCount) minIdx = n; 
+                                    }
+                                    unsigned int minRepId = hashSeqPair[extraRepIndices[minIdx]].id;
+                                    unsigned int newRepId = hashSeqPair[i].id;
+                                    if (countTable[minRepId] < countTable[newRepId]) {
+                                        extraRepIndices[minIdx] = i;
+                                    }
+                                }
+                            }
                         }
-                        if ((matchCount <= matchIdx) && (repIdx < i)) {
-                            matchIdx = matchCount;
-                            repIdx = i;
+                        
+                        // use adjacent information for selection of next Rep seqs
+                        if (extraSearchCount == 0) {
+                            int currentScore = 0;
+                            for (size_t n = 0; n < 6; n++) {
+                                currentScore += subMat->subMatrix[repAdjacent[n]][hashSeqPair[i].getAdjacentSeq(n)];
+                            }
+                            // for (size_t n = 0; n < 6*(k+1); n++) {
+                            //     currentScore += subMat->subMatrix[repAdjacent[n]][hashSeqPair[i].getAdjacentSeq(n%6)];
+                            // }
+                            if ((currentScore <= matchScore) && (repIdx < i)) {
+                            // if (currentScore <= matchScore) {
+                                bool isNew = true; 
+                                for (size_t n = 0; n < repSeqIds.size(); n++) {
+                                    if (repSeqIds[n] == hashSeqPair[i].id) {
+                                        isNew = false;
+                                        break;
+                                    }
+                                }
+                                if (isNew) {
+                                    matchScore = currentScore;
+                                    repIdx = i;
+                                }
+                            }
                         }
                         // store new connection information in hashSeqPair
-                        if ((includeOnlyExtendable == false && canBecovered) || (canBeExtended && includeOnlyExtendable == true)) {                            
+                        if ((includeOnlyExtendable == false && canBecovered) || (canBeExtended && includeOnlyExtendable == true)) {    
+                            totalAssign++;                        
                             // if possible, store information in an in-place manner
                             if (writePos < prevHashStart) {
                                 hashSeqPair[writePos].kmer = rId;
@@ -836,7 +947,7 @@ size_t assignGroup(KmerPosition<T, true> *hashSeqPair, size_t splitKmerCount, bo
                             // if both are impossible, increase hashSeqPair's memory and split again
                             }else {
                                 // Reallocate module
-                                if (tmpFile == "None") {
+                                if (tmpFile == "Resize") {
                                     hashSeqBuffer = 1 + (static_cast<float>(splitKmerCount) / static_cast<float>(writePos)) * (hashSeqBuffer - 1) * 1.2;
                                     return SIZE_T_MAX;
                                 }
@@ -848,7 +959,6 @@ size_t assignGroup(KmerPosition<T, true> *hashSeqPair, size_t splitKmerCount, bo
                                 hashSeqPair[splitKmerCount + writeTmp].id = hashSeqPair[i].id;
                                 writeTmp++;
 
-                                Debug(Debug::INFO) << "\nUnsufficient memory, Record contents to disk\n";
                                 std::string bufferName = tmpFile + "_" + SSTR(numDiskBuffer);
                                 // if(TYPE == Parameters::DBTYPE_NUCLEOTIDES){
                                 //     SORT_PARALLEL(&hashSeqPair[splitKmerCount], &hashSeqPair[splitKmerCount] + writeTmp, KmerPosition<T, true>::compareRepSequenceAndIdAndDiagReverse);
@@ -873,9 +983,38 @@ size_t assignGroup(KmerPosition<T, true> *hashSeqPair, size_t splitKmerCount, bo
                     }
                 }
                 // terminate iteration of the search within the same kmer group
-                if (matchIdx == matchThreshold) {
-                    break;
+                if (matchScore == matchThreshold) {
+                    size_t prevRepIdx = repIdx;
+                    while (extraSearchCount < extraRepIndices.size()) {
+                        bool isNew = true;
+                        for (size_t n = 0; n < repSeqIds.size(); n++) {
+                            if (repSeqIds[n] == hashSeqPair[extraRepIndices[extraSearchCount]].id) {
+                                isNew = false;
+                                extraSearchCount++;
+                                break;
+                            }
+                        }
+                        if (isNew) {
+                            repIdx = extraRepIndices[extraSearchCount];
+                            extraSearchCount++;
+                            break;
+                        }
+                    }
+                    if (prevRepIdx == repIdx) break;
                 }
+                // select all seq as the Rep seq without duplication of seq id 
+                // bool isNew;
+                // do {
+                //     repIdx++;
+                //     isNew = true; 
+                //     for (size_t m = 0; m < repSeqIds.size(); m++) {
+                //         if (repSeqIds[m] == hashSeqPair[repIdx].id) {
+                //             isNew = false;
+                //             break;
+                //         }
+                //     }
+                // } while (!isNew && repIdx < elementIdx);
+                // if (repIdx >= elementIdx) break;
             }
             // re-initialize variables
             prevHashStart = elementIdx;
@@ -901,19 +1040,25 @@ size_t assignGroup(KmerPosition<T, true> *hashSeqPair, size_t splitKmerCount, bo
     writePos = writePos + writeTmp;
     // mark the end index of the valid information as SIZE_T_MAX 
     hashSeqPair[writePos].kmer = SIZE_T_MAX;
+    Debug(Debug::INFO) << "\nTotal: " << totalAssign << "\n\n";
+    auto end = std::chrono::high_resolution_clock::now();
 
+    // 경과 시간 계산 (밀리초 단위)
+    std::chrono::duration<double> elapsed = end - start;
+    
+    std::cout << "Elapsed time: " << elapsed.count() << " s\n";
     return writePos;
 }
 
-template size_t assignGroup<0, short>(KmerPosition<short, false> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, BaseMatrix *subMat, float &hashSeqBuffer, std::string tmpFile, int &numDiskBuffer);
-template size_t assignGroup<0, int>(KmerPosition<int, false> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, BaseMatrix *subMat, float &hashSeqBuffer, std::string tmpFile, int &numDiskBuffer);
-template size_t assignGroup<1, short>(KmerPosition<short, false> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, BaseMatrix *subMat, float &hashSeqBuffer, std::string tmpFile, int &numDiskBuffer);
-template size_t assignGroup<1, int>(KmerPosition<int, false> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, BaseMatrix *subMat, float &hashSeqBuffer, std::string tmpFile, int &numDiskBuffer);
+template size_t assignGroup<0, short>(KmerPosition<short, false> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, BaseMatrix *subMat, float &hashSeqBuffer, std::string tmpFile, int &numDiskBuffer, std::vector<unsigned int> countTable);
+template size_t assignGroup<0, int>(KmerPosition<int, false> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, BaseMatrix *subMat, float &hashSeqBuffer, std::string tmpFile, int &numDiskBuffer, std::vector<unsigned int> countTable);
+template size_t assignGroup<1, short>(KmerPosition<short, false> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, BaseMatrix *subMat, float &hashSeqBuffer, std::string tmpFile, int &numDiskBuffer, std::vector<unsigned int> countTable);
+template size_t assignGroup<1, int>(KmerPosition<int, false> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, BaseMatrix *subMat, float &hashSeqBuffer, std::string tmpFile, int &numDiskBuffer, std::vector<unsigned int> countTable);
 
-template size_t assignGroup<0, short>(KmerPosition<short, true> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, BaseMatrix *subMat, float &hashSeqBuffer, std::string tmpFile, int &numDiskBuffer);
-template size_t assignGroup<0, int>(KmerPosition<int, true> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, BaseMatrix *subMat, float &hashSeqBuffer, std::string tmpFile, int &numDiskBuffer);
-template size_t assignGroup<1, short>(KmerPosition<short, true> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, BaseMatrix *subMat, float &hashSeqBuffer, std::string tmpFile, int &numDiskBuffer);
-template size_t assignGroup<1, int>(KmerPosition<int, true> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, BaseMatrix *subMat, float &hashSeqBuffer, std::string tmpFile, int &numDiskBuffer);
+template size_t assignGroup<0, short>(KmerPosition<short, true> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, BaseMatrix *subMat, float &hashSeqBuffer, std::string tmpFile, int &numDiskBuffer, std::vector<unsigned int> countTable);
+template size_t assignGroup<0, int>(KmerPosition<int, true> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, BaseMatrix *subMat, float &hashSeqBuffer, std::string tmpFile, int &numDiskBuffer, std::vector<unsigned int> countTable);
+template size_t assignGroup<1, short>(KmerPosition<short, true> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, BaseMatrix *subMat, float &hashSeqBuffer, std::string tmpFile, int &numDiskBuffer, std::vector<unsigned int> countTable);
+template size_t assignGroup<1, int>(KmerPosition<int, true> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, BaseMatrix *subMat, float &hashSeqBuffer, std::string tmpFile, int &numDiskBuffer, std::vector<unsigned int> countTable);
 
 
 void setLinearFilterDefault(Parameters *p) {
@@ -970,15 +1115,15 @@ int kmermatcherInner(Parameters& par, DBReader<unsigned int>& seqDbr) {
     size_t totalKmers = computeKmerCount(seqDbr, par.kmerSize, par.kmersPerSequence, kmersPerSequenceScale);
     size_t totalSizeNeeded = computeMemoryNeededLinearfilter<T, IncludeAdjacentSeq>(totalKmers);
     // resize additional memory
-    if(IncludeAdjacentSeq){
-        size_t tmpSizeNeeded = static_cast<size_t>(totalSizeNeeded * par.hashSeqBuffer);
-        size_t splits = static_cast<size_t>(std::ceil(static_cast<float>(tmpSizeNeeded) / memoryLimit));
-        size_t totalKmersPerSplit = std::max(static_cast<size_t>(1024+1),
-                                            static_cast<size_t>(std::min(tmpSizeNeeded, memoryLimit)/sizeof(KmerPosition<T, IncludeAdjacentSeq>))+1);
+    // if(IncludeAdjacentSeq){
+    //     size_t tmpSizeNeeded = static_cast<size_t>(totalSizeNeeded * par.hashSeqBuffer);
+    //     size_t splits = static_cast<size_t>(std::ceil(static_cast<float>(tmpSizeNeeded) / memoryLimit));
+    //     size_t totalKmersPerSplit = std::max(static_cast<size_t>(1024+1),
+    //                                         static_cast<size_t>(std::min(tmpSizeNeeded, memoryLimit)/sizeof(KmerPosition<T, IncludeAdjacentSeq>))+1);
 
-        std::vector<std::pair<size_t, size_t>> hashRanges = setupKmerSplits<T, IncludeAdjacentSeq>(par, subMat, seqDbr, totalKmersPerSplit, splits);
-        resizeBuffer<T, IncludeAdjacentSeq>(totalKmersPerSplit, hashRanges[0].first, hashRanges[0].second, seqDbr, par, subMat);
-    }
+    //     std::vector<std::pair<size_t, size_t>> hashRanges = setupKmerSplits<T, IncludeAdjacentSeq>(par, subMat, seqDbr, totalKmersPerSplit, splits);
+    //     resizeBuffer<T, IncludeAdjacentSeq>(totalKmersPerSplit, hashRanges[0].first, hashRanges[0].second, seqDbr, par, subMat);
+    // }
     totalKmers = static_cast<size_t>(totalKmers * par.hashSeqBuffer);
     totalSizeNeeded = static_cast<size_t>(totalSizeNeeded * par.hashSeqBuffer);
     // compute splits
@@ -1273,6 +1418,7 @@ void writeKmerMatcherResult(DBWriter & dbw,
             // compute best diagonal and score for every group of target sequences
             while(lastTargetId != targetId
                   && kmerPos+kmerOffset < threadOffsets[thread+1]
+                  && hashSeqPair[kmerPos+kmerOffset].kmer == repSeqId
                   && hashSeqPair[kmerPos+kmerOffset].id == targetId){
                 if(prevDiagonal == hashSeqPair[kmerPos+kmerOffset].pos){
                     diagonalCnt++;
@@ -1555,7 +1701,7 @@ void writeKmersToDisk(std::string tmpFile, KmerPosition<seqLenType, IncludeAdjSe
                 reverse += isReverse == true;
             }
             kmerPos++;
-        }while(targetId == hashSeqPair[kmerPos].id && hashSeqPair[kmerPos].pos == diagonal && kmerPos < totalKmers && hashSeqPair[kmerPos].kmer != SIZE_T_MAX);
+        }while(repSeqId == hashSeqPair[kmerPos].kmer && targetId == hashSeqPair[kmerPos].id && hashSeqPair[kmerPos].pos == diagonal && kmerPos < totalKmers && hashSeqPair[kmerPos].kmer != SIZE_T_MAX);
         kmerPos--;
 
         elemenetCnt++;

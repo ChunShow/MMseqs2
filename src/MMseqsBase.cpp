@@ -1302,5 +1302,13 @@ std::vector<Command> baseCommands = {
                 NULL,
                 "",
                 "",
-                CITATION_MMSEQS2, {{"",DbType::ACCESS_MODE_INPUT, DbType::NEED_DATA, NULL}}}
+                CITATION_MMSEQS2, {{"",DbType::ACCESS_MODE_INPUT, DbType::NEED_DATA, NULL}}},
+        {"resortprefilter",                resortprefilter,                &par.resortprefilter,        COMMAND_HIDDEN,
+                "resort prefilter",
+                NULL,
+                "Martin Steinegger <martin.steinegger@snu.ac.kr>",
+                "<i:queryDB> <i:targetDB> <o:alignmentDB>",
+                CITATION_MMSEQS2, {{"DB", DbType::ACCESS_MODE_INPUT, DbType::NEED_DATA, &DbValidator::sequenceDb },
+                                                           {"prefilterDB", DbType::ACCESS_MODE_INPUT, DbType::NEED_DATA, &DbValidator::prefilterDb },
+                                                           {"prefilterDB_resort", DbType::ACCESS_MODE_OUTPUT, DbType::NEED_DATA, &DbValidator::prefilterDb }}}
 };

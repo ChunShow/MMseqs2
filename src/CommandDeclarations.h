@@ -139,4 +139,5 @@ extern int filtertaxseqdb(int argc, const char **argv, const Command& command);
 extern int aggregatetax(int argc, const char **argv, const Command& command);
 extern int aggregatetaxweights(int argc, const char **argv, const Command& command);
 extern int diskspaceavail(int argc, const char **argv, const Command& command);
+extern int resortprefilter(int argc, const char **argv, const Command& command);
 #endif

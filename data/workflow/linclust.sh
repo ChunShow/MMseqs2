@@ -65,6 +65,21 @@ if [ -n "$FILTER" ]; then
             || fail "Ungapped alignment step died"
     fi
     RESULTDB="${TMP_PATH}/pref_rescore2"
+
+    # Resort prefilter rescore 2 by count
+    if notExists "${TMP_PATH}/pref_resorted.dbtype"; then
+        # shellcheck disable=SC2086
+        $RUNNER "$MMSEQS" resortprefilter "$1" "${TMP_PATH}/pref_rescore2" "${TMP_PATH}/pref_rescore2_resorted" ${RESORTPREFILTER_PAR} \
+            || fail "Resort prefilter rescore step died"
+    fi
+
+    # Merge two results
+    if [ ! -e "${TMP_PATH}/pref_rescore2_merged.dbtype" ]; then
+        # shellcheck disable=SC2086
+        "$MMSEQS" mergedbs "${TMP_PATH}/pref_rescore2" "${TMP_PATH}/pref_rescore2_merged" "${TMP_PATH}/pref_rescore2" "${TMP_PATH}/pref_rescore2_resorted" ${VERB_COMP_PAR} \
+            || fail "Merge prefilter rescore step died"
+    fi
+    RESULTDB="${TMP_PATH}/pref_rescore2_merged"
 fi
 
 # 4. Local gapped sequence alignment.
@@ -107,6 +122,10 @@ if [ -n "$REMOVE_TMP" ]; then
     if [ -n "$FILTER" ]; then
         # shellcheck disable=SC2086
         "$MMSEQS" rmdb "${TMP_PATH}/pref_rescore2" ${VERBOSITY}
+        # shellcheck disable=SC2086
+        "$MMSEQS" rmdb "${TMP_PATH}/pref_rescore2_resorted" ${VERBOSITY}
+        # shellcheck disable=SC2086
+        "$MMSEQS" rmdb "${TMP_PATH}/pref_rescore2_merged" ${VERBOSITY}
     fi
     # shellcheck disable=SC2086
     "$MMSEQS" rmdb "${TMP_PATH}/aln" ${VERBOSITY}
