@@ -263,6 +263,7 @@ Parameters::Parameters():
         // mergedbs
         PARAM_MERGE_PREFIXES(PARAM_MERGE_PREFIXES_ID, "--prefixes", "Merge prefixes", "Comma separated list of prefixes for each entry", typeid(std::string), (void *) &mergePrefixes, "", MMseqsParameter::COMMAND_EXPERT),
         PARAM_MERGE_STOP_EMPTY(PARAM_MERGE_STOP_EMPTY_ID, "--merge-stop-empty", "Stop merge after empty", "Don't continue merging entries after an empty entry", typeid(bool), (void*)&mergeStopEmpty, "", MMseqsParameter::COMMAND_EXPERT),
+        PARAM_MERGE_MODE(PARAM_MERGE_MODE_ID, "--merge-mode", "Merge Mode", "Merge mode 0: merge all entries, 1: Merge only unique entries by keys(key only)", typeid(int), (void*)&mergeMode, "^[0-1]{1}$", MMseqsParameter::COMMAND_EXPERT),
         // summarizeresult
         PARAM_OVERLAP(PARAM_OVERLAP_ID, "--overlap", "Overlap threshold", "Maximum overlap of covered regions", typeid(float), (void *) &overlap, "^[0-9]*(\\.[0-9]+)?$"),
         // msa2profile
@@ -1050,7 +1051,7 @@ Parameters::Parameters():
     mergedbs.push_back(&PARAM_MERGE_STOP_EMPTY);
     mergedbs.push_back(&PARAM_COMPRESSED);
     mergedbs.push_back(&PARAM_V);
-
+    mergedbs.push_back(&PARAM_MERGE_MODE);
     // summarize
     summarizeheaders.push_back(&PARAM_SUMMARY_PREFIX);
     summarizeheaders.push_back(&PARAM_HEADER_TYPE);
@@ -2573,6 +2574,7 @@ void Parameters::setDefaults() {
     // mergedbs
     mergePrefixes = "";
     mergeStopEmpty = false;
+    mergeMode = 0;
 
     // summarizetabs
     overlap = 0.0f;
