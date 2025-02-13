@@ -10,74 +10,74 @@
 #include "itoa.h"
 #include "Timer.h"
 #include <algorithm>
-#include <unordered_set>
 #include <vector>
 
-struct CountEntry {
-    unsigned int proteinKey;
-    unsigned int entryCount, clusterSizeWeightedCount, repWeightedCount;
-    CountEntry() : proteinKey(UINT_MAX), entryCount(0), clusterSizeWeightedCount(0), repWeightedCount(0) {}
-    CountEntry(unsigned int proteinKey, unsigned int entryCount, unsigned int clusterSizeWeightedCount, unsigned int repWeightedCount) : proteinKey(proteinKey), entryCount(entryCount), clusterSizeWeightedCount(clusterSizeWeightedCount), repWeightedCount(repWeightedCount) {}
+struct CountTableEntry {
+    unsigned int proteinId;
+    unsigned int entryCount, clusterSizeWeightedCount, seqLength;
+    CountTableEntry() : proteinId(UINT_MAX), entryCount(0), clusterSizeWeightedCount(0), seqLength(0) {}
+    CountTableEntry(unsigned int proteinId, unsigned int entryCount, unsigned int clusterSizeWeightedCount, unsigned int seqLength) : proteinId(proteinId), entryCount(entryCount), clusterSizeWeightedCount(clusterSizeWeightedCount), seqLength(seqLength) {}
 };
 
-struct prefEntry {
-    unsigned int repKey;
-    unsigned int proteinKey;
-    prefEntry() : repKey(UINT_MAX) {}
-    prefEntry(unsigned int repKey, unsigned int proteinKey) : repKey(repKey), proteinKey(proteinKey) {}
+struct DBEntry {
+    unsigned int repId;
+    unsigned int proteinId;
+    DBEntry() : repId(UINT_MAX) {}
+    DBEntry(unsigned int repId, unsigned int proteinId) : repId(repId), proteinId(proteinId) {}
     
-    static bool compareByRepKeyNProteinKey(const prefEntry &a, const prefEntry &b)
+    static bool compareByRepIdNProteinId(const DBEntry &a, const DBEntry &b)
     {
-        if (a.repKey < b.repKey) {
+        if (a.repId < b.repId) {
             return true;
         }
-        if (a.repKey > b.repKey) {
+        if (a.repId > b.repId) {
             return false;
         }
 
-        bool a_special = (a.repKey == a.proteinKey); 
-        bool b_special = (b.repKey == b.proteinKey);
-
-        if (a_special && !b_special) {
+        bool aIsRep = (a.repId == a.proteinId); 
+        bool bIsRep = (b.repId == b.proteinId);
+        
+        // move Rep to the front
+        if (aIsRep && !bIsRep) {
             return true;    
         }
-        if (!a_special && b_special) {
+        if (!aIsRep && bIsRep) {
             return false; 
         }
 
-        return (a.proteinKey < b.proteinKey);
+        return (a.proteinId < b.proteinId);
     }
-    static bool compareByCountTable(const prefEntry &a, const prefEntry &b, 
-                                const std::vector<CountEntry> &countTable)
+    
+    static bool compareByCountTable(const DBEntry &a, const DBEntry &b, 
+                                const std::vector<CountTableEntry> &countTable)
     {
 
-        // const bool a_is_special = (a.repKey == a.proteinKey);
-        // const bool b_is_special = (b.repKey == b.proteinKey);
-
-        // if (a_is_special && !b_is_special) {
-        //     return false;  
-        // }
-        // if (!a_is_special && b_is_special) {
-        //     return true;   
-        // }
-
-        const CountEntry &ca = countTable[a.proteinKey];
-        const CountEntry &cb = countTable[b.proteinKey];
+        const bool aIsPrevRep = (a.repId == a.proteinId);
+        const bool bIsPrevRep = (b.repId == b.proteinId);
         
-      
-        // 2) entryCount 
+        // If a or b is prevRep, it should be the last in group
+        if (aIsPrevRep && !bIsPrevRep) {
+            return false;  
+        }
+        if (!aIsPrevRep && bIsPrevRep) {
+            return true;   
+        }
+
+        const CountTableEntry &ca = countTable[a.proteinId];
+        const CountTableEntry &cb = countTable[b.proteinId];
+        // Priority: 
+        // 1) entryCount 
         if (ca.entryCount > cb.entryCount) return true;
         if (ca.entryCount < cb.entryCount) return false;
+        
+        // 2) sequenceLength 
+        if (ca.seqLength > cb.seqLength) return true;
+        if (ca.seqLength < cb.seqLength) return false;
 
-        // 1) clusterSizeWeightedCount 
-        if (ca.clusterSizeWeightedCount > cb.clusterSizeWeightedCount) return true;
-        if (ca.clusterSizeWeightedCount < cb.clusterSizeWeightedCount) return false;
+        // // 1) clusterSizeWeightedCount 
+        // if (ca.clusterSizeWeightedCount > cb.clusterSizeWeightedCount) return true;
+        // if (ca.clusterSizeWeightedCount < cb.clusterSizeWeightedCount) return false;
 
-
-        // // 3) repWeightedCount 
-        // if (ca.repWeightedCount > cb.repWeightedCount) return true;
-        // if (ca.repWeightedCount < cb.repWeightedCount) return false;
-       
         return false;
     }
 };
@@ -93,25 +93,23 @@ int resortprefilter(int argc, const char **argv, const Command &command){
     resdbr.open(DBReader<unsigned int>::LINEAR_ACCCESS);
 
 
-    std::vector<CountEntry> countTable; // need to optimize
+    std::vector<CountTableEntry> countTable;
     countTable.reserve(qdbr.getSize());
-
+    std::cout << "qdbr size: " << qdbr.getSize() << std::endl;
     for (size_t i=0; i < qdbr.getSize(); ++i) {
         unsigned int dbKey = qdbr.getDbKey(i);
-        countTable.push_back(CountEntry(dbKey, 0, 0, 0));
-        // std::cout << i << " " << dbKey << std::endl;
-        // if (i != dbKey) {
-        //     std::cout << "Error: " << i << " " << dbKey << std::endl;
-        // }
+        size_t queryId = qdbr.getId(dbKey);
+        
+        unsigned int seqLength = qdbr.getSeqLen(queryId);
+        countTable.push_back(CountTableEntry(queryId, 0, 0, 0));
     }
 
     if (countTable.size() != qdbr.getSize()) {
         std::cout << "Error: " << countTable.size() << " " << qdbr.getSize() << std::endl;
         EXIT(EXIT_FAILURE);
     }
-
-    std::vector<prefEntry> prefEntries;
-    prefEntries.reserve(resdbr.getSize());
+    std::vector<DBEntry> DBEntries;
+    DBEntries.reserve(resdbr.getSize());
 
     #pragma omp parallel 
     {
@@ -120,126 +118,125 @@ int resortprefilter(int argc, const char **argv, const Command &command){
         thread_idx = (unsigned int) omp_get_thread_num();
     #endif    
         char buffer[1024 + 32768 * 4];
-        std::vector<prefEntry> localPrefEntries;
+        std::vector<DBEntry> localDBEntries;
         #pragma omp for schedule(dynamic, 1)
         for (size_t id=0; id < resdbr.getSize(); ++id) {
             char* data = resdbr.getData(id, thread_idx);
-            std::vector<unsigned int> memberKeys;
+            std::vector<unsigned int> memberIds;
             //1. Fill countTable
-            unsigned int referenceKey = UINT_MAX;
+            unsigned int repId = UINT_MAX;
             if (*data != '\0') {
                 Util::parseKey(data, buffer);
-                referenceKey = (unsigned int) strtoul(buffer, NULL, 10);
+                unsigned int referenceKey = (unsigned int) strtoul(buffer, NULL, 10);
+                repId= qdbr.getId(referenceKey);
             }
             while (*data != '\0') {
                 Util::parseKey(data, buffer);
                 const unsigned int key = (unsigned int) strtoul(buffer, NULL, 10);
-                memberKeys.push_back(key);
-                localPrefEntries.push_back(prefEntry(referenceKey, key));
+                unsigned int proteinId= qdbr.getId(key);
+                memberIds.push_back(proteinId);
+                localDBEntries.push_back(DBEntry(repId, proteinId));
                 data = Util::skipLine(data);
             }
             
-            if (referenceKey != memberKeys[0]) {
-                std::cout << "Error: " << referenceKey << " " << memberKeys[0] << std::endl;
+            if (repId != memberIds[0]) {
+                std::cout << "Error: " << repId << " " << memberIds[0] << std::endl;
                 EXIT(EXIT_FAILURE);
             }
 
-            unsigned int clustSize = memberKeys.size();
-            if (memberKeys.size() > 1) { // Try to ignore singletons
-                for (size_t i=0; i < memberKeys.size(); ++i) {
-                    __sync_fetch_and_add(&countTable[memberKeys[i]].entryCount, 1); // update EntryCount
-                    __sync_fetch_and_add(&countTable[memberKeys[i]].clusterSizeWeightedCount, clustSize);
-                    __sync_fetch_and_add(&countTable[memberKeys[i]].repWeightedCount, 1);
+            unsigned int clustSize = memberIds.size();
+            if (memberIds.size() > 1) { // Try to ignore singletons
+                for (size_t i=0; i < memberIds.size(); ++i) {
+                    __sync_fetch_and_add(&countTable[memberIds[i]].entryCount, 1);
+                    __sync_fetch_and_add(&countTable[memberIds[i]].clusterSizeWeightedCount, clustSize);
                 }
-                __sync_fetch_and_add(&countTable[referenceKey].repWeightedCount, clustSize-1);
             }
         }
 
         #pragma omp critical
         {
-            prefEntries.insert(prefEntries.end(),
-                            std::make_move_iterator(localPrefEntries.begin()),
-                            std::make_move_iterator(localPrefEntries.end()));
+            DBEntries.insert(DBEntries.end(),
+                            std::make_move_iterator(localDBEntries.begin()),
+                            std::make_move_iterator(localDBEntries.end()));
         }
     }
 
-    // load prefEntries and sort its members by countTable
-    unsigned int prevRepKey = prefEntries[0].repKey;
+    // load DBEntries and sort its members by countTable
+    unsigned int prevRepId = DBEntries[0].repId;
     size_t prevGroupStart = 0;
-    for (size_t elementIdx = 0; elementIdx <= prefEntries.size(); ++elementIdx) { //등호?
-        unsigned int currRepKey = (elementIdx == prefEntries.size()) ? UINT_MAX : prefEntries[elementIdx].repKey;
+    for (size_t elementIdx = 0; elementIdx <= DBEntries.size(); ++elementIdx) { 
+        unsigned int currRepId = (elementIdx == DBEntries.size()) ? UINT_MAX : DBEntries[elementIdx].repId;
         
-        if (prevRepKey != currRepKey) {
+        if (prevRepId != currRepId) {
             // if singletons, do nothing
             if (elementIdx == prevGroupStart + 1) {
-                prevRepKey = currRepKey;
+                prevRepId = currRepId;
                 prevGroupStart = elementIdx;
                 continue;
             }
-            // std::cout << "group: " << prevRepKey << std::endl;
-            // else sort the group and reset repKey
-            //Debug before sort
-            SORT_SERIAL(prefEntries.begin() + prevGroupStart, prefEntries.begin() + elementIdx,
-                    [&](const prefEntry &lhs, const prefEntry &rhs) {
-                        return prefEntry::compareByCountTable(lhs, rhs, countTable);
+            // else sort the group by countTable
+            SORT_SERIAL(DBEntries.begin() + prevGroupStart, DBEntries.begin() + elementIdx,
+                    [&](const DBEntry &lentry, const DBEntry &rentry) {
+                        return DBEntry::compareByCountTable(lentry, rentry, countTable);
                     });
 
-            unsigned int newRepKey = prefEntries[prevGroupStart].proteinKey;
-            //Resetup repKey
+            unsigned int newRepId = DBEntries[prevGroupStart].proteinId;
+            // reassign(change) repId
             for (size_t i = prevGroupStart; i < elementIdx; ++i) {
-                prefEntries[i].repKey = newRepKey;
+                DBEntries[i].repId = newRepId;
             }
-            prevRepKey = currRepKey;
+            prevRepId = currRepId;
             prevGroupStart = elementIdx;
         }
-
     }
-    SORT_SERIAL(prefEntries.begin(), prefEntries.end(), prefEntry::compareByRepKeyNProteinKey);
+    // sort DBEntries by new RepKey
+    // 1) sort by repId 2) In each group, sort by proteinId. Rep should be the first in the group for writer
+    SORT_SERIAL(DBEntries.begin(), DBEntries.end(), DBEntry::compareByRepIdNProteinId);
 
     DBWriter dbw(par.db3.c_str(), par.db3Index.c_str(), par.threads, par.compressed, Parameters::DBTYPE_PREFILTER_RES);
     dbw.open();
     
-    prevRepKey = prefEntries[0].repKey;
+    prevRepId = DBEntries[0].repId;
     prevGroupStart = 0;
-    if (prevRepKey != 0 ) {
+    if (prevRepId != 0 ) {
         //write singleton result
         std::string resultOutString;
         resultOutString.reserve(300);
-        for (size_t key = 0; key < prevRepKey; ++key) {
-            resultOutString.append(SSTR(key));
+        for (size_t id = 0; id < prevRepId; ++id) {
+            resultOutString.append(SSTR(qdbr.getDbKey(id)));
             resultOutString.push_back('\n');
-            dbw.writeData(resultOutString.c_str(), resultOutString.length(), key, 0);
+            dbw.writeData(resultOutString.c_str(), resultOutString.length(), qdbr.getDbKey(id), 0);
             resultOutString.clear();
         }
     }
 
-    for (size_t elementIdx = 0; elementIdx <= prefEntries.size(); ++elementIdx) {
-        unsigned int currRepKey = (elementIdx == prefEntries.size()) ? qdbr.getSize() : prefEntries[elementIdx].repKey; // Need to check 
-        if (currRepKey != prevRepKey) {
+    for (size_t elementIdx = 0; elementIdx <= DBEntries.size(); ++elementIdx) {
+        unsigned int currRepId = (elementIdx == DBEntries.size()) ? qdbr.getSize() : DBEntries[elementIdx].repId; // Need to check 
+        if (currRepId != prevRepId) {
             std::string resultOutString;
             resultOutString.reserve(1024);
 
             // write the current group
-            unsigned int prevProtKey = UINT_MAX;
+            unsigned int prevProtId = UINT_MAX;
             for (size_t i = prevGroupStart; i < elementIdx; ++i) { //instead of using set
-                if (prevProtKey != prefEntries[i].proteinKey) {
-                    resultOutString.append(SSTR(prefEntries[i].proteinKey));
+                if (prevProtId != DBEntries[i].proteinId) {
+                    resultOutString.append(SSTR(qdbr.getDbKey(DBEntries[i].proteinId)));
                     resultOutString.push_back('\n');
-                    prevProtKey = prefEntries[i].proteinKey;
+                    prevProtId = DBEntries[i].proteinId;
                 }
             }
-            dbw.writeData(resultOutString.c_str(), resultOutString.length(), prevRepKey, 0);
+            dbw.writeData(resultOutString.c_str(), resultOutString.length(), qdbr.getDbKey(prevRepId), 0);
             resultOutString.clear();
-            //remaining singletons : prevRepKey + 1 ~ currRepKey - 1
-            if (currRepKey - prevRepKey > 1) { // discontinuous
-                for (size_t rep = prevRepKey + 1; rep < currRepKey; ++rep) {
-                    resultOutString.append(SSTR(rep));
+            //remaining singletons : prevRepId + 1 ~ currRepId - 1
+            if (currRepId - prevRepId > 1) { // discontinuous
+                for (size_t rep = prevRepId + 1; rep < currRepId; ++rep) {
+                    resultOutString.append(SSTR(qdbr.getDbKey(rep)));
                     resultOutString.push_back('\n');
-                    dbw.writeData(resultOutString.c_str(), resultOutString.length(), rep, 0);
+                    dbw.writeData(resultOutString.c_str(), resultOutString.length(), qdbr.getDbKey(rep), 0);
                     resultOutString.clear();
                 }
             }
-            prevRepKey = currRepKey;
+            prevRepId = currRepId;
             prevGroupStart = elementIdx;
         }
     }
