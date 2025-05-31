@@ -31,6 +31,7 @@ Sequence::Sequence(size_t maxLen, int seqType, const BaseMatrix *subMat, const u
     this->aaPosInSpacedPattern = NULL;
     this->shouldAddPC = shouldAddPC;
     this->userSpacedKmerPattern = userSpacedKmerPattern;
+    this->kmerPatternCount = 1;
     if(spacedPatternSize){
         simdKmerRegisterCnt = (kmerSize / (VECSIZE_INT*4)) + 1;
         unsigned int simdKmerLen =  simdKmerRegisterCnt *  (VECSIZE_INT*4); // for SIMD memory alignment

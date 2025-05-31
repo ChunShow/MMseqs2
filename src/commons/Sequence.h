@@ -409,6 +409,23 @@ public:
             return kmerWindow;
         }
 
+        if (hasNextKmer() == false && this->kmerPatternCount > 0) {
+            resetCurrPos();
+            this->kmerPatternCount--;
+
+            std::pair<const char *, unsigned int> spacedKmerInformation = getSpacedPattern(true, this->kmerSize);
+            this->spacedPattern = spacedKmerInformation.first;
+            this->spacedPatternSize = spacedKmerInformation.second;
+
+            size_t pos = 0;
+            for(int i = 0; i < this->spacedPatternSize; i++) {
+                if(spacedPattern[i]){
+                    aaPosInSpacedPattern[pos] = i;
+                    pos++;
+                }
+            }
+        }
+
         return (const unsigned char *)kmerWindow;
     }
 
@@ -586,5 +603,8 @@ private:
 
     // user kmer pattern
     std::string userSpacedKmerPattern;
+
+    // number of k-mer patterns currently in use
+    unsigned int kmerPatternCount;
 };
 #endif

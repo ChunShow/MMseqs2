@@ -97,8 +97,8 @@ std::pair<size_t, size_t> fillKmerPositionArray(KmerPosition<T> * kmerArray, siz
         const unsigned int BUFFER_SIZE = 1048576;
         size_t bufferPos = 0;
         KmerPosition<T> * threadKmerBuffer = new KmerPosition<T>[BUFFER_SIZE];
-        SequencePosition * kmers = (SequencePosition *) malloc((par.pickNbest * (par.maxSeqLen + 1) + 1) * sizeof(SequencePosition));
-        size_t kmersArraySize = par.maxSeqLen;
+        SequencePosition * kmers = (SequencePosition *) malloc((par.pickNbest * (par.maxSeqLen + 1) + 1) * sizeof(SequencePosition) * 2);
+        size_t kmersArraySize = par.maxSeqLen * 2;
         const size_t flushSize = 100000000;
         size_t iterations = static_cast<size_t>(ceil(static_cast<double>(seqDbr.getSize()) / static_cast<double>(flushSize)));
         for (size_t i = 0; i < iterations; i++) {
@@ -196,7 +196,7 @@ std::pair<size_t, size_t> fillKmerPositionArray(KmerPosition<T> * kmerArray, siz
                         seqKmerCount++;
                     }
                     if(seqKmerCount >= kmersArraySize){
-                        kmersArraySize = seq.getMaxLen();
+                        kmersArraySize = seq.getMaxLen() * 2;
                         kmers = (SequencePosition *) realloc(kmers, (par.pickNbest * (kmersArraySize + 1) + 1) * sizeof(SequencePosition));
                     }
 
