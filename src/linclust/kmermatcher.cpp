@@ -63,6 +63,7 @@ std::pair<size_t, size_t> fillKmerPositionArray(KmerPosition<T, IncludeAdjacentS
     size_t offset = 0;
     int querySeqType  =  seqDbr.getDbtype();
     size_t longestKmer = par.kmerSize;
+    const unsigned char xIndex = subMat->aa2num[static_cast<int>('X')];
 
 
     ScoreMatrix two;
@@ -230,6 +231,11 @@ std::pair<size_t, size_t> fillKmerPositionArray(KmerPosition<T, IncludeAdjacentS
                         threadKmerBuffer[bufferPos].id = seqId;
                         threadKmerBuffer[bufferPos].pos = 0;
                         threadKmerBuffer[bufferPos].seqLen = seq.L;
+                        if (IncludeAdjacentSeq) {
+                            for (size_t i = 0; i < 6; i++) {
+                                threadKmerBuffer[bufferPos].setAdjacentSeq(i, xIndex);
+                            }
+                        }
                         bufferPos++;
                         if (bufferPos >= BUFFER_SIZE) {
                             size_t writeOffset = __sync_fetch_and_add(&offset, bufferPos);
@@ -309,6 +315,37 @@ std::pair<size_t, size_t> fillKmerPositionArray(KmerPosition<T, IncludeAdjacentS
                             threadKmerBuffer[bufferPos].id = seqId;
                             threadKmerBuffer[bufferPos].pos = (kmers + kmerIdx)->pos;
                             threadKmerBuffer[bufferPos].seqLen = seq.L;
+                            if (IncludeAdjacentSeq) {
+                                // store adjacent sequence information
+                                unsigned int startPos = (kmers + kmerIdx)->pos;
+                                unsigned int endPos = (kmers + kmerIdx)->pos + seq.getEffectiveKmerSize() - 1;
+                                if (startPos >= 3) {
+                                    threadKmerBuffer[bufferPos].setAdjacentSeq(0, seq.numSequence[startPos]);
+                                    threadKmerBuffer[bufferPos].setAdjacentSeq(1, seq.numSequence[startPos]);
+                                    threadKmerBuffer[bufferPos].setAdjacentSeq(2, seq.numSequence[startPos]);
+                                }else if (startPos == 2) {
+                                    threadKmerBuffer[bufferPos].setAdjacentSeq(0, xIndex);
+                                    threadKmerBuffer[bufferPos].setAdjacentSeq(1, seq.numSequence[startPos - 2]);
+                                    threadKmerBuffer[bufferPos].setAdjacentSeq(2, seq.numSequence[startPos - 1]);
+                                }else if (startPos == 1) {
+                                    threadKmerBuffer[bufferPos].setAdjacentSeq(0, xIndex);
+                                    threadKmerBuffer[bufferPos].setAdjacentSeq(1, xIndex);
+                                    threadKmerBuffer[bufferPos].setAdjacentSeq(2, seq.numSequence[startPos - 1]);
+                                }
+                                if (endPos + 3 <= static_cast<unsigned int>(seq.L) - 1) {
+                                    threadKmerBuffer[bufferPos].setAdjacentSeq(3, seq.numSequence[endPos + 1]);
+                                    threadKmerBuffer[bufferPos].setAdjacentSeq(4, seq.numSequence[endPos + 2]);
+                                    threadKmerBuffer[bufferPos].setAdjacentSeq(5, seq.numSequence[endPos + 3]);
+                                }else if (endPos + 2 == static_cast<unsigned int>(seq.L) - 1) {
+                                    threadKmerBuffer[bufferPos].setAdjacentSeq(3, seq.numSequence[endPos + 1]);
+                                    threadKmerBuffer[bufferPos].setAdjacentSeq(4, seq.numSequence[endPos + 2]);
+                                    threadKmerBuffer[bufferPos].setAdjacentSeq(5, xIndex);
+                                }else if (endPos + 1 == static_cast<unsigned int>(seq.L) - 1) {
+                                    threadKmerBuffer[bufferPos].setAdjacentSeq(3, seq.numSequence[endPos + 1]);
+                                    threadKmerBuffer[bufferPos].setAdjacentSeq(4, xIndex);
+                                    threadKmerBuffer[bufferPos].setAdjacentSeq(5, xIndex);
+                                }
+                            }
                             bufferPos++;
 
                             if (bufferPos >= BUFFER_SIZE) {
