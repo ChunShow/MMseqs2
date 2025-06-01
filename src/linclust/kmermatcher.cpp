@@ -475,6 +475,13 @@ KmerPosition<T> * doComputation(size_t totalKmers, size_t hashStartRange, size_t
 
     delete sequenceWeights;
 
+    if (splitFile == "RESIZE") {
+        Debug(Debug::INFO) << "\n";
+        delete [] hashSeqPair;
+        hashSeqPair = NULL;
+        return hashSeqPair;
+    }
+
     // sort by rep. sequence (stored in kmer) and sequence id
     Debug(Debug::INFO) << "Sort by rep. sequence ";
     timer.reset();
@@ -595,7 +602,7 @@ size_t assignGroup(KmerPosition<T> *hashSeqPair, size_t splitKmerCount, bool inc
                     }
                 }
 //                hashSeqPair[i].kmer = SIZE_T_MAX;
-                hashSeqPair[i].kmer = (i != writePos - 1) ? SIZE_T_MAX : hashSeqPair[i].kmer;
+//                hashSeqPair[i].kmer = (i != writePos - 1) ? SIZE_T_MAX : hashSeqPair[i].kmer;
             }
             prevSetSize = 0;
             skipByWeightCount = 0;
@@ -620,6 +627,7 @@ size_t assignGroup(KmerPosition<T> *hashSeqPair, size_t splitKmerCount, bool inc
             prevHash = BIT_SET(prevHash, 63);
         }
     }
+    hashSeqPair[writePos].kmer = SIZE_T_MAX;
 
     return writePos;
 }
@@ -675,6 +683,12 @@ int kmermatcherInner(Parameters& par, DBReader<unsigned int>& seqDbr) {
 
     //seqDbr.readMmapedDataInMemory();
 
+    size_t * hashDist = NULL;
+    if (par.includeAdjacentSeq) {
+        hashDist = new size_t[USHRT_MAX+1];
+        memset(hashDist, 0 , sizeof(size_t) * (USHRT_MAX+1));
+    }
+
     // memoryLimit in bytes
     size_t memoryLimit=Util::computeMemory(par.splitMemoryLimit);
 
@@ -687,8 +701,31 @@ int kmermatcherInner(Parameters& par, DBReader<unsigned int>& seqDbr) {
     size_t splits = static_cast<size_t>(std::ceil(static_cast<float>(totalSizeNeeded) / memoryLimit));
     size_t totalKmersPerSplit = std::max(static_cast<size_t>(1024+1),
                                          static_cast<size_t>(std::min(totalSizeNeeded, memoryLimit)/sizeof(KmerPosition<T>))+1);
+    
+    std::vector<std::pair<size_t, size_t>> hashRanges;
+    if (par.includeAdjacentSeq) {
+        // calculate extra memory for resizing
+        std::pair<size_t, size_t> resizeRange = setupResize<T>(par, subMat, seqDbr, totalKmersPerSplit, splits, hashDist);
+        Debug(Debug::INFO) << "Resize extra memory\n";
+        float extraMemoryScale = par.extraMemoryScale;
+        doComputation<T>(totalKmersPerSplit, resizeRange.first, resizeRange.second, "RESIZE", seqDbr, par, subMat);
+        // if (par.extraMemoryScale > extraMemoryScale){
+        //     extraMemoryScale = par.extraMemoryScale;
+        // }
+        if (true){
+            extraMemoryScale = 1;
+        }
+        splits = static_cast<size_t>(std::ceil(static_cast<float>(totalSizeNeeded) * (1 + extraMemoryScale) / memoryLimit));
+        totalKmersPerSplit = std::max(static_cast<size_t>(1024+1),
+                                      static_cast<size_t>((std::min(static_cast<size_t>(totalSizeNeeded * (1 + extraMemoryScale)), memoryLimit)/sizeof(KmerPosition<T>))/(1 + extraMemoryScale))+1);
+        hashRanges = setupResizedSplits(totalKmersPerSplit, splits, hashDist);
+        totalKmersPerSplit = std::max(static_cast<size_t>(1024+1),
+                                      static_cast<size_t>(std::min(static_cast<size_t>(totalSizeNeeded * (1 + extraMemoryScale)), memoryLimit)/sizeof(KmerPosition<T>))+1);
+        delete [] hashDist;
+    }else {
+        hashRanges = setupKmerSplits<T>(par, subMat, seqDbr, totalKmersPerSplit, splits);
+    }
 
-    std::vector<std::pair<size_t, size_t>> hashRanges = setupKmerSplits<T>(par, subMat, seqDbr, totalKmersPerSplit, splits);
     if(splits > 1){
         Debug(Debug::INFO) << "Process file into " << hashRanges.size() << " parts\n";
     }
@@ -838,6 +875,64 @@ std::vector<std::pair<size_t, size_t>> setupKmerSplits(Parameters &par, BaseMatr
         }
         hashRanges.emplace_back(currBucketStart, (USHRT_MAX+1));
         delete [] hashDist;
+    }else{
+        hashRanges.emplace_back(0, SIZE_T_MAX);
+    }
+    return hashRanges;
+}
+
+template <typename T>
+std::pair<size_t, size_t> setupResize(Parameters &par, BaseMatrix * subMat, DBReader<unsigned int> &seqDbr, size_t totalKmers, size_t splits, size_t * hashDist){
+    std::pair<size_t, size_t> resizeRange;
+    Debug(Debug::INFO) << "Initiating resizing stage\n";
+    // compute exact k-mer dist
+    if(Parameters::isEqualDbtype(seqDbr.getDbtype(), Parameters::DBTYPE_NUCLEOTIDES)){
+        fillKmerPositionArray<Parameters::DBTYPE_NUCLEOTIDES, T>(NULL, SIZE_T_MAX, seqDbr, par, subMat, true, 0, SIZE_T_MAX, hashDist);
+    }else{
+        fillKmerPositionArray<Parameters::DBTYPE_AMINO_ACIDS, T>(NULL, SIZE_T_MAX, seqDbr, par, subMat, true, 0, SIZE_T_MAX, hashDist);
+    }
+    seqDbr.remapData();
+    if (splits > 1) {
+        // figure out if machine has enough memory to run this job
+        size_t maxBucketSize = 0;
+        for(size_t i = 0; i < (USHRT_MAX+1); i++) {
+            if(maxBucketSize < hashDist[i]){
+                maxBucketSize = hashDist[i];
+            }
+        }
+        if(maxBucketSize > totalKmers){
+            Debug(Debug::INFO) << "Not enough memory to run the kmermatcher. Minimum is at least " << maxBucketSize* sizeof(KmerPosition<T>) << " bytes\n";
+            EXIT(EXIT_FAILURE);
+        }
+    }
+    // define partial split for resizing
+    size_t currBucketSize = 0;
+    size_t resizeThreshold = static_cast<size_t>(totalKmers / 10);
+    for(size_t i = 0; i < (USHRT_MAX+1); i++){
+        if(currBucketSize+hashDist[i] >= resizeThreshold){
+            resizeRange = std::make_pair(0, i - 1);
+            break;
+        }
+        currBucketSize+=hashDist[i];
+    }
+    return resizeRange;
+}
+
+std::vector<std::pair<size_t, size_t>> setupResizedSplits(size_t totalKmers, size_t splits, size_t * hashDist){
+    std::vector<std::pair<size_t, size_t>> hashRanges;
+    if (splits > 1) {
+        // define splits
+        size_t currBucketSize = 0;
+        size_t currBucketStart = 0;
+        for(size_t i = 0; i < (USHRT_MAX+1); i++){
+            if(currBucketSize+hashDist[i] >= totalKmers){
+                hashRanges.emplace_back(currBucketStart, i - 1);
+                currBucketSize = 0;
+                currBucketStart = i;
+            }
+            currBucketSize+=hashDist[i];
+        }
+        hashRanges.emplace_back(currBucketStart, (USHRT_MAX+1));
     }else{
         hashRanges.emplace_back(0, SIZE_T_MAX);
     }
@@ -1315,5 +1410,8 @@ template size_t computeMemoryNeededLinearfilter<int>(size_t totalKmer);
 
 template std::vector<std::pair<size_t, size_t>>  setupKmerSplits<short>(Parameters &par, BaseMatrix * subMat, DBReader<unsigned int> &seqDbr, size_t totalKmers, size_t splits);
 template std::vector<std::pair<size_t, size_t>>  setupKmerSplits<int>(Parameters &par, BaseMatrix * subMat, DBReader<unsigned int> &seqDbr, size_t totalKmers, size_t splits);
+
+template std::pair<size_t, size_t>  setupResize<short>(Parameters &par, BaseMatrix * subMat, DBReader<unsigned int> &seqDbr, size_t totalKmers, size_t splits, size_t * hashDist);
+template std::pair<size_t, size_t>  setupResize<int>(Parameters &par, BaseMatrix * subMat, DBReader<unsigned int> &seqDbr, size_t totalKmers, size_t splits, size_t * hashDist);
 
 #undef SIZE_T_MAX

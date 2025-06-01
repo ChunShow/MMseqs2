@@ -570,6 +570,8 @@ public:
     int resultDirection;
     float weightThr;
     std::string weightFile;
+    bool includeAdjacentSeq;
+    float extraMemoryScale;
 
     // indexdb
     int checkCompatible;

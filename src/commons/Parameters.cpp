@@ -2593,6 +2593,8 @@ void Parameters::setDefaults() {
     resultDirection = Parameters::PARAM_RESULT_DIRECTION_TARGET;
     weightThr = 0.9;
     weightFile = "";
+    includeAdjacentSeq = true;
+    extraMemoryScale = 0.01;
 
     // result2stats
     stat = "";

@@ -235,6 +235,11 @@ size_t computeMemoryNeededLinearfilter(size_t totalKmer);
 template <typename T>
 std::vector<std::pair<size_t, size_t>> setupKmerSplits(Parameters &par, BaseMatrix * subMat, DBReader<unsigned int> &seqDbr, size_t totalKmers, size_t splits);
 
+template <typename T>
+std::pair<size_t, size_t> setupResize(Parameters &par, BaseMatrix * subMat, DBReader<unsigned int> &seqDbr, size_t totalKmers, size_t splits, size_t * hashDist);
+
+std::vector<std::pair<size_t, size_t>> setupResizedSplits(size_t totalKmers, size_t splits, size_t * hashDist);
+
 size_t computeKmerCount(DBReader<unsigned int> &reader, size_t KMER_SIZE, size_t chooseTopKmer,
                         float chooseTopKmerScale = 0.0);
 
