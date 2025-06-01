@@ -109,6 +109,28 @@ Sequence::~Sequence() {
     }
 }
 
+bool Sequence::hasNextKmer() {
+    bool hasNext = ((currItPos + 1) + this->spacedPatternSize) <= this->L;
+    if (hasNext == false && this->kmerPatternCount > 0) {
+        resetCurrPos();
+        this->kmerPatternCount--;
+
+        std::pair<const char *, unsigned int> spacedKmerInformation = getSpacedPattern(true, this->kmerSize);
+        this->spacedPattern = spacedKmerInformation.first;
+        this->spacedPatternSize = spacedKmerInformation.second;
+
+        size_t pos = 0;
+        for(int i = 0; i < this->spacedPatternSize; i++) {
+            if(spacedPattern[i]){
+                aaPosInSpacedPattern[pos] = i;
+                pos++;
+            }
+        }
+        hasNext = ((currItPos + 1) + this->spacedPatternSize) <= this->L;
+    }
+    return hasNext;
+}
+
 std::pair<const char *, unsigned int> Sequence::getSpacedPattern(bool spaced, unsigned int kmerSize){
 #define CASE(x) {case x: \
                       if(spaced){ \

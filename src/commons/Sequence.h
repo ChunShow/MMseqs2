@@ -89,9 +89,7 @@ public:
     void mapProfile(const char *profileData, unsigned int seqLen);
 
     // checks if there is still a k-mer left
-    bool hasNextKmer() {
-        return (((currItPos + 1) + this->spacedPatternSize) <= this->L);
-    }
+    bool hasNextKmer();
 
     // k-mer contains x, is only field aftter nextKmer
     inline bool kmerContainsX(){
@@ -407,23 +405,6 @@ public:
                 kmerWindow[i] = 0;
             }
             return kmerWindow;
-        }
-
-        if (hasNextKmer() == false && this->kmerPatternCount > 0) {
-            resetCurrPos();
-            this->kmerPatternCount--;
-
-            std::pair<const char *, unsigned int> spacedKmerInformation = getSpacedPattern(true, this->kmerSize);
-            this->spacedPattern = spacedKmerInformation.first;
-            this->spacedPatternSize = spacedKmerInformation.second;
-
-            size_t pos = 0;
-            for(int i = 0; i < this->spacedPatternSize; i++) {
-                if(spacedPattern[i]){
-                    aaPosInSpacedPattern[pos] = i;
-                    pos++;
-                }
-            }
         }
 
         return (const unsigned char *)kmerWindow;
