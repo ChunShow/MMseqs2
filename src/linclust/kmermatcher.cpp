@@ -509,15 +509,16 @@ KmerPosition<T, IncludeAdjacentSeq> * doComputation(size_t totalKmers, size_t ha
     // The longest sequence is the first since we sorted by kmer, seq.Len and id
     size_t writePos;
     if(Parameters::isEqualDbtype(seqDbr.getDbtype(), Parameters::DBTYPE_NUCLEOTIDES)){
-        writePos = assignGroup<Parameters::DBTYPE_NUCLEOTIDES, T, IncludeAdjacentSeq>(hashSeqPair, totalKmers, par.includeOnlyExtendable, par.covMode, par.covThr, sequenceWeights, par.weightThr);
+        writePos = assignGroup<Parameters::DBTYPE_NUCLEOTIDES, T, IncludeAdjacentSeq>(hashSeqPair, totalKmers, par.includeOnlyExtendable, par.covMode, par.covThr, sequenceWeights, par.weightThr, elementsToSort, subMat, splitFile);
     }else{
-        writePos = assignGroup<Parameters::DBTYPE_AMINO_ACIDS, T, IncludeAdjacentSeq>(hashSeqPair, totalKmers, par.includeOnlyExtendable, par.covMode, par.covThr, sequenceWeights, par.weightThr);
+        writePos = assignGroup<Parameters::DBTYPE_AMINO_ACIDS, T, IncludeAdjacentSeq>(hashSeqPair, totalKmers, par.includeOnlyExtendable, par.covMode, par.covThr, sequenceWeights, par.weightThr, elementsToSort, subMat, splitFile);
     }
 
     delete sequenceWeights;
 
     if (splitFile == "RESIZE") {
         Debug(Debug::INFO) << "\n";
+        par.extraMemoryScale = std::round(1.1 * static_cast<float>(writePos) / static_cast<float>(elementsToSort) * 1000.0f) / 1000.0f;
         delete [] hashSeqPair;
         hashSeqPair = NULL;
         return hashSeqPair;
@@ -553,7 +554,7 @@ KmerPosition<T, IncludeAdjacentSeq> * doComputation(size_t totalKmers, size_t ha
 
 template <int TYPE, typename T, bool IncludeAdjacentSeq>
 size_t assignGroup(KmerPosition<T, IncludeAdjacentSeq> *hashSeqPair, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr,
-                   SequenceWeights * sequenceWeights, float weightThr) {
+                   SequenceWeights * sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile) {
     size_t writePos=0;
     size_t prevHash = hashSeqPair[0].kmer;
     size_t repSeqId = hashSeqPair[0].id;
@@ -568,85 +569,171 @@ size_t assignGroup(KmerPosition<T, IncludeAdjacentSeq> *hashSeqPair, size_t spli
     T queryLen=hashSeqPair[0].seqLen;
     bool repIsReverse = false;
     T repSeq_i_pos = hashSeqPair[0].pos;
-    for (size_t elementIdx = 0; elementIdx < splitKmerCount+1; elementIdx++) {
+    // for adjacent sequences
+    size_t writeExtraPos = 0;
+    size_t repSeqNum = 1;
+    unsigned char repAdjacent[6];
+    if (IncludeAdjacentSeq) {
+        if (splitFile == "RESIZE") {
+            repSeqNum = 1;
+        } else {
+            repSeqNum = 1;
+        }
+        for (size_t i = 0; i < repSeqNum; i++) {
+            repAdjacent[i] = hashSeqPair[0].getAdjacentSeq(i);
+        }
+    }
+    for (size_t elementIdx = 0; elementIdx < extraMemoryPos; elementIdx++) {
         size_t currKmer = hashSeqPair[elementIdx].kmer;
         if(TYPE == Parameters::DBTYPE_NUCLEOTIDES){
             currKmer = BIT_SET(currKmer, 63);
         }
         if (prevHash != currKmer) {
-            for (size_t i = prevHashStart; i < elementIdx; i++) {
-                // skip target sequences if weight > weightThr
-                if(i > prevHashStart && sequenceWeights != NULL
-                   && sequenceWeights->getWeightById(hashSeqPair[i].id) > weightThr)
-                    continue;
-                size_t kmer = hashSeqPair[i].kmer;
-                if(TYPE == Parameters::DBTYPE_NUCLEOTIDES) {
-                    kmer = BIT_SET(hashSeqPair[i].kmer, 63);
-                }
-                size_t rId = (kmer != SIZE_T_MAX) ? ((prevSetSize-skipByWeightCount == 1) ? SIZE_T_MAX : repSeqId) : SIZE_T_MAX;
-                // remove singletones from set
-                if(rId != SIZE_T_MAX){
-                    int diagonal = repSeq_i_pos - hashSeqPair[i].pos;
+            size_t adjacentRepIdx = prevHashStart;
+            std::vector<unsigned int> selectedRepIds;
+            for (size_t j = 0; j < repSeqNum; j++) {
+                int adjacentScore = 0;
+                int scoreThreshold = 0;
+                if (IncludeAdjacentSeq) {
+                    repSeqId = hashSeqPair[adjacentRepIdx].id;
                     if(TYPE == Parameters::DBTYPE_NUCLEOTIDES){
-                        //  00 No problem here both are forward
-                        //  01 We can revert the query of target, lets invert the query.
-                        //  10 Same here, we can revert query to match the not inverted target
-                        //  11 Both are reverted so no problem!
-                        //  So we need just 1 bit of information to encode all four states
-                        bool targetIsReverse = (BIT_CHECK(hashSeqPair[i].kmer, 63) == false);
-                        bool queryNeedsToBeRev = false;
-                        // we now need 2 byte of information (00),(01),(10),(11)
-                        // we need to flip the coordinates of the query
-                        T queryPos=0;
-                        T targetPos=0;
-                        // revert kmer in query hits normal kmer in target
-                        // we need revert the query
-                        if (repIsReverse == true && targetIsReverse == false){
-                            queryPos = repSeq_i_pos;
-                            targetPos =  hashSeqPair[i].pos;
-                            queryNeedsToBeRev = true;
-                            // both k-mers were extracted on the reverse strand
-                            // this is equal to both are extract on the forward strand
-                            // we just need to offset the position to the forward strand
-                        }else if (repIsReverse == true && targetIsReverse == true){
-                            queryPos = (queryLen - 1) - repSeq_i_pos;
-                            targetPos = (hashSeqPair[i].seqLen - 1) - hashSeqPair[i].pos;
-                            queryNeedsToBeRev = false;
-                            // query is not revers but target k-mer is reverse
-                            // instead of reverting the target, we revert the query and offset the the query/target position
-                        }else if (repIsReverse == false && targetIsReverse == true){
-                            queryPos = (queryLen - 1) - repSeq_i_pos;
-                            targetPos = (hashSeqPair[i].seqLen - 1) - hashSeqPair[i].pos;
-                            queryNeedsToBeRev = true;
-                            // both are forward, everything is good here
-                        }else{
-                            queryPos = repSeq_i_pos;
-                            targetPos =  hashSeqPair[i].pos;
-                            queryNeedsToBeRev = false;
-                        }
-                        diagonal = queryPos - targetPos;
-                        rId = (queryNeedsToBeRev) ? BIT_CLEAR(rId, 63) : BIT_SET(rId, 63);
+                        repIsReverse = (BIT_CHECK(hashSeqPair[adjacentRepIdx].kmer, 63) == 0);
+                        repSeqId = (repIsReverse) ? repSeqId : BIT_SET(repSeqId, 63);
                     }
-//                    std::cout << diagonal << "\t" << repSeq_i_pos << "\t" << hashSeqPair[i].pos << std::endl;
-
-
-                    bool canBeExtended = diagonal < 0 || (diagonal > (queryLen - hashSeqPair[i].seqLen));
-                    bool canBecovered = Util::canBeCovered(covThr, covMode,
-                                                           static_cast<float>(queryLen),
-                                                           static_cast<float>(hashSeqPair[i].seqLen));
-                    if((includeOnlyExtendable == false && canBecovered) || (canBeExtended && includeOnlyExtendable ==true )){
-                        hashSeqPair[writePos].kmer = rId;
-                        hashSeqPair[writePos].pos = diagonal;
-                        hashSeqPair[writePos].seqLen = hashSeqPair[i].seqLen;
-                        hashSeqPair[writePos].id = hashSeqPair[i].id;
-                        writePos++;
+                    queryLen = hashSeqPair[adjacentRepIdx].seqLen;
+                    repSeq_i_pos = hashSeqPair[adjacentRepIdx].pos;
+                    for (size_t k = 0; k < 6; k++) {
+                        repAdjacent[k] = hashSeqPair[adjacentRepIdx].getAdjacentSeq(k);
+                        adjacentScore += subMat->subMatrix[repAdjacent[k]][repAdjacent[k]];
                     }
+                    scoreThreshold = adjacentScore;
+                    selectedRepIds.push_back(repSeqId);
                 }
+
+                for (size_t i = prevHashStart; i < elementIdx; i++) {
+                    // skip target sequences if weight > weightThr
+                    size_t kmer = hashSeqPair[i].kmer;
+                    if(TYPE == Parameters::DBTYPE_NUCLEOTIDES) {
+                        kmer = BIT_SET(hashSeqPair[i].kmer, 63);
+                    }
+                    size_t rId;
+                    if (j == 0) {
+                        if(i > prevHashStart && sequenceWeights != NULL
+                        && sequenceWeights->getWeightById(hashSeqPair[i].id) > weightThr)
+                            continue;
+                        rId = (kmer != SIZE_T_MAX) ? ((prevSetSize-skipByWeightCount == 1) ? SIZE_T_MAX : repSeqId) : SIZE_T_MAX;
+                    }else {
+                        if(sequenceWeights != NULL
+                        && sequenceWeights->getWeightById(hashSeqPair[i].id) > weightThr)
+                            continue;
+                        rId = (kmer != SIZE_T_MAX) ? repSeqId : SIZE_T_MAX;
+                    }
+                    // remove singletones from set
+                    if(rId != SIZE_T_MAX){
+                        int diagonal = repSeq_i_pos - hashSeqPair[i].pos;
+                        if(TYPE == Parameters::DBTYPE_NUCLEOTIDES){
+                            //  00 No problem here both are forward
+                            //  01 We can revert the query of target, lets invert the query.
+                            //  10 Same here, we can revert query to match the not inverted target
+                            //  11 Both are reverted so no problem!
+                            //  So we need just 1 bit of information to encode all four states
+                            bool targetIsReverse = (BIT_CHECK(hashSeqPair[i].kmer, 63) == false);
+                            bool queryNeedsToBeRev = false;
+                            // we now need 2 byte of information (00),(01),(10),(11)
+                            // we need to flip the coordinates of the query
+                            T queryPos=0;
+                            T targetPos=0;
+                            // revert kmer in query hits normal kmer in target
+                            // we need revert the query
+                            if (repIsReverse == true && targetIsReverse == false){
+                                queryPos = repSeq_i_pos;
+                                targetPos =  hashSeqPair[i].pos;
+                                queryNeedsToBeRev = true;
+                                // both k-mers were extracted on the reverse strand
+                                // this is equal to both are extract on the forward strand
+                                // we just need to offset the position to the forward strand
+                            }else if (repIsReverse == true && targetIsReverse == true){
+                                queryPos = (queryLen - 1) - repSeq_i_pos;
+                                targetPos = (hashSeqPair[i].seqLen - 1) - hashSeqPair[i].pos;
+                                queryNeedsToBeRev = false;
+                                // query is not revers but target k-mer is reverse
+                                // instead of reverting the target, we revert the query and offset the the query/target position
+                            }else if (repIsReverse == false && targetIsReverse == true){
+                                queryPos = (queryLen - 1) - repSeq_i_pos;
+                                targetPos = (hashSeqPair[i].seqLen - 1) - hashSeqPair[i].pos;
+                                queryNeedsToBeRev = true;
+                                // both are forward, everything is good here
+                            }else{
+                                queryPos = repSeq_i_pos;
+                                targetPos =  hashSeqPair[i].pos;
+                                queryNeedsToBeRev = false;
+                            }
+                            diagonal = queryPos - targetPos;
+                            rId = (queryNeedsToBeRev) ? BIT_CLEAR(rId, 63) : BIT_SET(rId, 63);
+                        }
+    //                    std::cout << diagonal << "\t" << repSeq_i_pos << "\t" << hashSeqPair[i].pos << std::endl;
+
+                        if (IncludeAdjacentSeq) {
+                            int currScore = 0;
+                            for (size_t k = 0; k < 6; k++) {
+                                currScore += subMat->subMatrix[repAdjacent[k]][hashSeqPair[i].getAdjacentSeq(k)];
+                            }
+                            if (currScore <= adjacentScore && adjacentRepIdx < i) {
+                                bool isDuplicate = false;
+                                for (size_t k = 0; k < j + 1; k++) {
+                                    if (selectedRepIds[k] == hashSeqPair[i].id) {
+                                        isDuplicate = true;
+                                        break;
+                                    }
+                                }
+                                if (!isDuplicate) {
+                                    adjacentScore = currScore;
+                                    adjacentRepIdx = i;
+                                }
+                            }
+                        }
+
+                        bool canBeExtended = diagonal < 0 || (diagonal > (queryLen - hashSeqPair[i].seqLen));
+                        bool canBecovered = Util::canBeCovered(covThr, covMode,
+                                                            static_cast<float>(queryLen),
+                                                            static_cast<float>(hashSeqPair[i].seqLen));
+                        if((includeOnlyExtendable == false && canBecovered) || (canBeExtended && includeOnlyExtendable ==true )){
+                            if (!IncludeAdjacentSeq) {
+                                hashSeqPair[writePos].kmer = rId;
+                                hashSeqPair[writePos].pos = diagonal;
+                                hashSeqPair[writePos].seqLen = hashSeqPair[i].seqLen;
+                                hashSeqPair[writePos].id = hashSeqPair[i].id;
+                                writePos++;
+                            }else {
+                                // if possible, store information in an in-place manner
+                                if (writePos < prevHashStart) {
+                                    hashSeqPair[writePos].kmer = rId;
+                                    hashSeqPair[writePos].pos = diagonal;
+                                    hashSeqPair[writePos].seqLen = hashSeqPair[i].seqLen;
+                                    hashSeqPair[writePos].id = hashSeqPair[i].id;
+                                    writePos++;
+                                // otherwise, store information sequentially starting from the extraMemoryPos
+                                }
+                                else if (extraMemoryPos + writeExtraPos < splitKmerCount-1) {
+                                    hashSeqPair[extraMemoryPos + writeExtraPos].kmer = rId;
+                                    hashSeqPair[extraMemoryPos + writeExtraPos].pos = diagonal;
+                                    hashSeqPair[extraMemoryPos + writeExtraPos].seqLen = hashSeqPair[i].seqLen;
+                                    hashSeqPair[extraMemoryPos + writeExtraPos].id = hashSeqPair[i].id;
+                                    writeExtraPos++;
+                                }
+                            }
+                        }
+                    }
 //                hashSeqPair[i].kmer = SIZE_T_MAX;
 //                hashSeqPair[i].kmer = (i != writePos - 1) ? SIZE_T_MAX : hashSeqPair[i].kmer;
+                }
+                if (adjacentScore == scoreThreshold) {
+                    break;
+                }
             }
             prevSetSize = 0;
             skipByWeightCount = 0;
+            prevHash = currKmer;
             prevHashStart = elementIdx;
             repSeqId = hashSeqPair[elementIdx].id;
             if(TYPE == Parameters::DBTYPE_NUCLEOTIDES){
@@ -656,31 +743,39 @@ size_t assignGroup(KmerPosition<T, IncludeAdjacentSeq> *hashSeqPair, size_t spli
             queryLen = hashSeqPair[elementIdx].seqLen;
             repSeq_i_pos = hashSeqPair[elementIdx].pos;
         }
-        if (hashSeqPair[elementIdx].kmer == SIZE_T_MAX) {
+        if (currKmer == SIZE_T_MAX) {
             break;
         }
         prevSetSize++;
         if(prevSetSize > 1 && sequenceWeights != NULL
            && sequenceWeights->getWeightById(hashSeqPair[elementIdx].id) > weightThr)
             skipByWeightCount++;
-        prevHash = hashSeqPair[elementIdx].kmer;
-        if(TYPE == Parameters::DBTYPE_NUCLEOTIDES){
-            prevHash = BIT_SET(prevHash, 63);
-        }
     }
+
+    if (IncludeAdjacentSeq) {
+        // if (splitFile == "RESIZE") {
+        //     return writeExtraPos;
+        // }
+        // re-order hashSeqPair
+        for (size_t i = 0; i < writeExtraPos; i++) {
+            hashSeqPair[writePos + i] = hashSeqPair[extraMemoryPos + i];
+        }
+        writePos = writePos + writeExtraPos;
+    }
+    // set the last element to SIZE_T_MAX
     hashSeqPair[writePos].kmer = SIZE_T_MAX;
 
     return writePos;
 }
 
-template size_t assignGroup<0, short, true>(KmerPosition<short, true> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr);
-template size_t assignGroup<0, short, false>(KmerPosition<short, false> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr);
-template size_t assignGroup<0, int, true>(KmerPosition<int, true> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr);
-template size_t assignGroup<0, int, false>(KmerPosition<int, false> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr);
-template size_t assignGroup<1, short, true>(KmerPosition<short, true> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr);
-template size_t assignGroup<1, short, false>(KmerPosition<short, false> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr);
-template size_t assignGroup<1, int, true>(KmerPosition<int, true> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr);
-template size_t assignGroup<1, int, false>(KmerPosition<int, false> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr);
+template size_t assignGroup<0, short, true>(KmerPosition<short, true> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile);
+template size_t assignGroup<0, short, false>(KmerPosition<short, false> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile);
+template size_t assignGroup<0, int, true>(KmerPosition<int, true> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile);
+template size_t assignGroup<0, int, false>(KmerPosition<int, false> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile);
+template size_t assignGroup<1, short, true>(KmerPosition<short, true> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile);
+template size_t assignGroup<1, short, false>(KmerPosition<short, false> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile);
+template size_t assignGroup<1, int, true>(KmerPosition<int, true> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile);
+template size_t assignGroup<1, int, false>(KmerPosition<int, false> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile);
 
 
 void setLinearFilterDefault(Parameters *p) {
