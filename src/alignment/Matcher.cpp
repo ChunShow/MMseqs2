@@ -18,7 +18,8 @@ Matcher::Matcher(int querySeqType, int targetSeqType, int maxSeqLen, BaseMatrix 
     } else {
         nuclaligner = NULL;
         aligner = new SmithWaterman(maxSeqLen, m->alphabetSize, aaBiasCorrection,
-                                    aaBiasCorrectionScale, targetSeqType);
+                                    aaBiasCorrectionScale, (SubstitutionMatrix*) m);
+        setSubstitutionMatrix(m);
     }
     //std::cout << "lambda=" << lambdaLog2 << " logKLog2=" << logKLog2 << std::endl;
 }
@@ -106,7 +107,8 @@ Matcher::result_t Matcher::getSWResult(Sequence* dbSeq, const int diagonal, bool
     // try to estimate sequence id
     if(alignmentMode == Matcher::SCORE_COV_SEQID){
         // compute sequence id
-        if(alignment.cigar){
+        // if(alignment.cigar){
+        if ( backtrace.size() > 0 ) {
             // OVERWRITE alnLength with gapped value
             alnLength = backtrace.size();
         }
@@ -255,7 +257,7 @@ Matcher::result_t Matcher::parseAlignmentRecord(const char *data, bool readCompr
                                      alnLength, qStart, qEnd, qLen, dbStart, dbEnd,
                                      dbLen, Util::fast_atoi<int>(entry[10]), Util::fast_atoi<int>(entry[11]),
                                      Util::fast_atoi<int>(entry[12]), Util::fast_atoi<int>(entry[13]), "");
-        // 13 without backtrace but qOrfStart dbOrfStart
+        // 13 with backtrace and qOrfStart dbOrfStart
         case ALN_RES_WITH_ORF_AND_BT_COL_CNT:
             if (readCompressed) {
                 return Matcher::result_t(targetId, score, qCov, dbCov, seqId, eval,
