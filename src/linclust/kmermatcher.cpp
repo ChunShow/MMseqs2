@@ -315,6 +315,8 @@ std::pair<size_t, size_t> fillKmerPositionArray(KmerPosition<T, IncludeAdjacentS
                             threadKmerBuffer[bufferPos].id = seqId;
                             threadKmerBuffer[bufferPos].pos = (kmers + kmerIdx)->pos;
                             threadKmerBuffer[bufferPos].seqLen = seq.L;
+                            //gyuri
+                            threadKmerBuffer[bufferPos].kmerGroup = (kmers + kmerIdx)->kmer;
                             if (IncludeAdjacentSeq) {
                                 // store adjacent sequence information
                                 unsigned int startPos = (kmers + kmerIdx)->pos;
@@ -466,7 +468,7 @@ template void swapCenterSequence<1, int, false>(KmerPosition<int, false> *kmers,
 
 template <typename T, bool IncludeAdjacentSeq>
 KmerPosition<T, IncludeAdjacentSeq> * doComputation(size_t totalKmers, size_t hashStartRange, size_t hashEndRange, std::string splitFile,
-                                                    DBReader<unsigned int> & seqDbr, Parameters & par, BaseMatrix  * subMat) {
+                                                    DBReader<unsigned int> & seqDbr, Parameters & par, BaseMatrix  * subMat, size_t& wPos) {
 
     KmerPosition<T, IncludeAdjacentSeq> * hashSeqPair = initKmerPositionMemory<T, IncludeAdjacentSeq>(totalKmers);
     size_t elementsToSort;
@@ -544,9 +546,61 @@ KmerPosition<T, IncludeAdjacentSeq> * doComputation(size_t totalKmers, size_t ha
         }else{
             writeKmersToDisk<Parameters::DBTYPE_AMINO_ACIDS, KmerEntry, T, IncludeAdjacentSeq>(splitFile, hashSeqPair, writePos + 1);
         }
+        //gyuri commentout
         delete [] hashSeqPair;
         hashSeqPair = NULL;
     }
+    std::cout << "writePos in doComputation: " << writePos << std::endl; //gyuri    
+    wPos = writePos; //gyuri
+
+    //gyuri
+    //make CountTable
+    // std::vector<std::pair<size_t, size_t>> countTable(seqDbr.getSize());
+    // for (size_t i = 0; i < countTable.size(); ++i) countTable[i].first = i;
+    // for (size_t kmerPos = 0; kmerPos < totalKmers && hashSeqPair[kmerPos].kmer != SIZE_T_MAX; ++kmerPos) {
+    //     countTable[hashSeqPair[kmerPos].id].second += 1;
+    // }
+
+    // SORT_PARALLEL(hashSeqPair, hashSeqPair + writePos, KmerPosition<T, IncludeAdjacentSeq>::compareKmerGroupAndIdAndDiag);
+    
+    // size_t prevKmerGroup = hashSeqPair[0].kmerGroup;
+    // size_t prevRep = hashSeqPair[0].kmer;
+    // size_t prevKmerGroupStart = 0;
+    // for(size_t elementIdx = 0; elementIdx < totalKmers && hashSeqPair[elementIdx].kmer != SIZE_T_MAX; elementIdx++){
+    //     size_t currRep = hashSeqPair[elementIdx].kmer;
+    //     size_t currKmerGroup = hashSeqPair[elementIdx].kmerGroup;
+    //     if (prevRep != currRep || prevKmerGroup != currKmerGroup) {
+    //         // 1. find new Center
+    //         size_t nextCenterId;
+    //         size_t nextCenterCount = 0;
+    //         int diagonalPrevtoNewCenter;
+    //         for (size_t i = prevKmerGroupStart +1; i < elementIdx; i++) { 
+    //             size_t id = static_cast<size_t>(hashSeqPair[i].id);
+    //             if (countTable[id].second > nextCenterCount) {
+    //                 nextCenterCount = countTable[id].second;
+    //                 nextCenterId = id;
+    //                 diagonalPrevtoNewCenter = hashSeqPair[i].pos;
+    //             }
+    //         }
+    //         // 2. 
+    //         for (size_t i = prevKmerGroupStart; i < elementIdx; i++) {
+    //             // posA = OldCenter - eachKmer
+    //             // posB = diagonalPrevtoNewCenter = OldCenter - NewCenter 
+    //             // want = newCenter - eachKmer
+    //             hashSeqPair[i].kmer = nextCenterId;
+    //             hashSeqPair[i].pos = hashSeqPair[i].pos - diagonalPrevtoNewCenter;
+    //             hashSeqPair[i].seqLen = hashSeqPair[i].seqLen; // do we need?
+    //             hashSeqPair[i].id =hashSeqPair[i].id; // do we need?
+    //         }
+
+    //         prevKmerGroup = currKmerGroup;
+    //         prevRep = currRep;
+    //         prevKmerGroupStart = elementIdx;
+    //     }
+    // }
+
+    // SORT_PARALLEL(hashSeqPair, hashSeqPair + writePos, KmerPosition<T, IncludeAdjacentSeq>::compareRepSequenceAndIdAndDiag);
+    
     return hashSeqPair;
 }
 
@@ -699,6 +753,7 @@ size_t assignGroup(KmerPosition<T, IncludeAdjacentSeq> *hashSeqPair, size_t spli
                                                             static_cast<float>(hashSeqPair[i].seqLen));
                         if((includeOnlyExtendable == false && canBecovered) || (canBeExtended && includeOnlyExtendable ==true )){
                             if (!IncludeAdjacentSeq) {
+                                hashSeqPair[writePos].kmerGroup = hashSeqPair[i].kmer;
                                 hashSeqPair[writePos].kmer = rId;
                                 hashSeqPair[writePos].pos = diagonal;
                                 hashSeqPair[writePos].seqLen = hashSeqPair[i].seqLen;
@@ -707,6 +762,7 @@ size_t assignGroup(KmerPosition<T, IncludeAdjacentSeq> *hashSeqPair, size_t spli
                             }else {
                                 // if possible, store information in an in-place manner
                                 if (writePos < prevHashStart) {
+                                    hashSeqPair[writePos].kmerGroup = hashSeqPair[i].kmer;
                                     hashSeqPair[writePos].kmer = rId;
                                     hashSeqPair[writePos].pos = diagonal;
                                     hashSeqPair[writePos].seqLen = hashSeqPair[i].seqLen;
@@ -715,6 +771,7 @@ size_t assignGroup(KmerPosition<T, IncludeAdjacentSeq> *hashSeqPair, size_t spli
                                 // otherwise, store information sequentially starting from the extraMemoryPos
                                 }
                                 else if (extraMemoryPos + writeExtraPos < splitKmerCount-1) {
+                                    hashSeqPair[extraMemoryPos + writeExtraPos].kmerGroup = hashSeqPair[i].kmer;
                                     hashSeqPair[extraMemoryPos + writeExtraPos].kmer = rId;
                                     hashSeqPair[extraMemoryPos + writeExtraPos].pos = diagonal;
                                     hashSeqPair[extraMemoryPos + writeExtraPos].seqLen = hashSeqPair[i].seqLen;
@@ -843,12 +900,14 @@ int kmermatcherInner(Parameters& par, DBReader<unsigned int>& seqDbr) {
                                          static_cast<size_t>(std::min(totalSizeNeeded, memoryLimit)/sizeof(KmerPosition<T, IncludeAdjacentSeq>))+1);
     
     std::vector<std::pair<size_t, size_t>> hashRanges;
+    size_t wPos;
     if (IncludeAdjacentSeq) {
         // calculate extra memory for resizing
         std::pair<size_t, size_t> resizeRange = setupResize<T, IncludeAdjacentSeq>(par, subMat, seqDbr, totalKmersPerSplit, splits, hashDist);
         Debug(Debug::INFO) << "Resize extra memory\n";
         float extraMemoryScale = par.extraMemoryScale;
-        doComputation<T, IncludeAdjacentSeq>(totalKmersPerSplit, resizeRange.first, resizeRange.second, "RESIZE", seqDbr, par, subMat);
+        
+        doComputation<T, IncludeAdjacentSeq>(totalKmersPerSplit, resizeRange.first, resizeRange.second, "RESIZE", seqDbr, par, subMat, wPos);
         if (par.extraMemoryScale > extraMemoryScale){
             extraMemoryScale = par.extraMemoryScale;
         }
@@ -890,7 +949,7 @@ int kmermatcherInner(Parameters& par, DBReader<unsigned int>& seqDbr) {
 
     for(size_t split = fromSplit; split < fromSplit+splitCount; split++) {
         std::string splitFileName = par.db2 + "_split_" +SSTR(split);
-        hashSeqPair = doComputation<T, IncludeAdjacentSeq>(totalKmersPerSplit, hashRanges[split].first, hashRanges[split].second, splitFileName, seqDbr, par, subMat);
+        hashSeqPair = doComputation<T, IncludeAdjacentSeq>(totalKmersPerSplit, hashRanges[split].first, hashRanges[split].second, splitFileName, seqDbr, par, subMat,wPos );
     }
     MPI_Barrier(MPI_COMM_WORLD);
     if(mpiRank == 0){
@@ -906,7 +965,7 @@ int kmermatcherInner(Parameters& par, DBReader<unsigned int>& seqDbr) {
 
         std::string splitFileNameDone = splitFileName + ".done";
         if(FileUtil::fileExists(splitFileNameDone.c_str()) == false){
-            hashSeqPair = doComputation<T, IncludeAdjacentSeq>(totalKmersPerSplit, hashRanges[split].first, hashRanges[split].second, splitFileName, seqDbr, par, subMat);
+            hashSeqPair = doComputation<T, IncludeAdjacentSeq>(totalKmersPerSplit, hashRanges[split].first, hashRanges[split].second, splitFileName, seqDbr, par, subMat, wPos);
         }
 
         splitFiles.push_back(splitFileName);
@@ -916,9 +975,21 @@ int kmermatcherInner(Parameters& par, DBReader<unsigned int>& seqDbr) {
         std::vector<char> repSequence(seqDbr.getLastKey()+1);
         std::fill(repSequence.begin(), repSequence.end(), false);
         // write result
+        //gyuri
+        std::string db2_swap = par.db2 + "_swapCenter";
+        std::string db2Index_swap = par.db2Index + "_swapCenter";
+
         DBWriter dbw(par.db2.c_str(), par.db2Index.c_str(), 1, par.compressed,
-                     (Parameters::isEqualDbtype(seqDbr.getDbtype(), Parameters::DBTYPE_NUCLEOTIDES)) ? Parameters::DBTYPE_PREFILTER_REV_RES : Parameters::DBTYPE_PREFILTER_RES );
+                    Parameters::isEqualDbtype(seqDbr.getDbtype(), Parameters::DBTYPE_NUCLEOTIDES)
+                        ? Parameters::DBTYPE_PREFILTER_REV_RES
+                        : Parameters::DBTYPE_PREFILTER_RES);
         dbw.open();
+
+        DBWriter dbw2(db2_swap.c_str(), db2Index_swap.c_str(), 1, par.compressed,
+                    Parameters::isEqualDbtype(seqDbr.getDbtype(), Parameters::DBTYPE_NUCLEOTIDES)
+                        ? Parameters::DBTYPE_PREFILTER_REV_RES
+                        : Parameters::DBTYPE_PREFILTER_RES);
+        dbw2.open();
 
         Timer timer;
         if(splits > 1) {
@@ -940,9 +1011,6 @@ int kmermatcherInner(Parameters& par, DBReader<unsigned int>& seqDbr) {
                 writeKmerMatcherResult<Parameters::DBTYPE_AMINO_ACIDS>(dbw, hashSeqPair, totalKmersPerSplit, repSequence, 1);
             }
         }
-        Debug(Debug::INFO) << "Time for fill: " << timer.lap() << "\n";
-        // add missing entries to the result (needed for clustering)
-
 #pragma omp parallel num_threads(1)
         {
             unsigned int thread_idx = 0;
@@ -964,7 +1032,90 @@ int kmermatcherInner(Parameters& par, DBReader<unsigned int>& seqDbr) {
             }
         }
         dbw.close(false, false);
+
+
+
+        //gyuri
+        std::vector<std::pair<size_t, size_t>> countTable(seqDbr.getSize());
+        std::cout << "writePos: " << wPos << "\n";
+        for (size_t i = 0; i < countTable.size(); ++i) countTable[i].first = i;
+        for (size_t kmerPos = 0; kmerPos < totalKmers && hashSeqPair[kmerPos].kmer != SIZE_T_MAX; ++kmerPos) {
+            countTable[hashSeqPair[kmerPos].id].second += 1;
+        }
+        std::cout << "countTable done" << std::endl;
+        SORT_PARALLEL(hashSeqPair, hashSeqPair + wPos, KmerPosition<T, IncludeAdjacentSeq>::compareKmerGroupAndIdAndDiag);
+        std::cout << "sort done" << std::endl;
+        size_t prevKmerGroup = hashSeqPair[0].kmerGroup;
+        size_t prevRep = hashSeqPair[0].kmer;
+        size_t prevKmerGroupStart = 0;
+        for(size_t elementIdx = 0; elementIdx < totalKmers && hashSeqPair[elementIdx].kmer != SIZE_T_MAX; elementIdx++){
+            size_t currRep = hashSeqPair[elementIdx].kmer;
+            size_t currKmerGroup = hashSeqPair[elementIdx].kmerGroup;
+            if (prevRep != currRep || prevKmerGroup != currKmerGroup) {
+                // 1. find new Center
+                size_t nextCenterId;
+                size_t nextCenterCount = 0;
+                int diagonalPrevtoNewCenter;
+                for (size_t i = prevKmerGroupStart +1; i < elementIdx; i++) { 
+                    size_t id = static_cast<size_t>(hashSeqPair[i].id);
+                    if (countTable[id].second > nextCenterCount) {
+                        nextCenterCount = countTable[id].second;
+                        nextCenterId = id;
+                        diagonalPrevtoNewCenter = hashSeqPair[i].pos;
+                    }
+                }
+                // 2. 
+                for (size_t i = prevKmerGroupStart; i < elementIdx; i++) {
+                    // posA = OldCenter - eachKmer
+                    // posB = diagonalPrevtoNewCenter = OldCenter - NewCenter 
+                    // want = newCenter - eachKmer
+                    hashSeqPair[i].kmer = nextCenterId;
+                    hashSeqPair[i].pos = hashSeqPair[i].pos - diagonalPrevtoNewCenter;
+                    hashSeqPair[i].seqLen = hashSeqPair[i].seqLen; // do we need?
+                    hashSeqPair[i].id =hashSeqPair[i].id; // do we need?
+                }
+
+                prevKmerGroup = currKmerGroup;
+                prevRep = currRep;
+                prevKmerGroupStart = elementIdx;
+            }
+        }
+        std::cout << "swap done" << std::endl;
+        SORT_PARALLEL(hashSeqPair, hashSeqPair + wPos, KmerPosition<T, IncludeAdjacentSeq>::compareRepSequenceAndIdAndDiag);
+        std::cout << "sort after swap done" << std::endl;
+        std::fill(repSequence.begin(), repSequence.end(), false);
+        writeKmerMatcherResult<Parameters::DBTYPE_AMINO_ACIDS>(dbw2, hashSeqPair, totalKmersPerSplit, repSequence, 1);
+
+        Debug(Debug::INFO) << "Time for fill: " << timer.lap() << "\n";
+        // add missing entries to the result (needed for clustering)
+
+
+        
+#pragma omp parallel num_threads(1)
+        {
+            unsigned int thread_idx = 0;
+#ifdef OPENMP
+            thread_idx = static_cast<unsigned int>(omp_get_thread_num());
+#endif
+#pragma omp for
+            for (size_t id = 0; id < seqDbr.getSize(); id++) {
+                char buffer[100];
+                unsigned int dbKey = seqDbr.getDbKey(id);
+                if (repSequence[dbKey] == false) {
+                    hit_t h;
+                    h.prefScore = 0;
+                    h.diagonal = 0;
+                    h.seqId = dbKey;
+                    int len = QueryMatcher::prefilterHitToBuffer(buffer, h);
+                    dbw2.writeData(buffer, len, dbKey, thread_idx);
+                }
+            }
+        }
+        
+        dbw2.close(false, false);
     }
+
+  
     // free memory
     delete subMat;
     if(hashSeqPair){

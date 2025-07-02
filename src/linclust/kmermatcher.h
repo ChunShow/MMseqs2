@@ -74,6 +74,7 @@ struct __attribute__((__packed__))KmerPosition : public AdjacentSeqArray<Include
     unsigned int id;
     T seqLen;
     T pos;
+    size_t kmerGroup;
 
     static bool compareRepSequenceAndIdAndPos(const KmerPosition<T, IncludeAdjacentSeq> &first, const KmerPosition<T, IncludeAdjacentSeq> &second){
         if(first.kmer < second.kmer )
@@ -136,6 +137,26 @@ struct __attribute__((__packed__))KmerPosition : public AdjacentSeqArray<Include
     }
 
     static bool compareRepSequenceAndIdAndDiag(const KmerPosition<T, IncludeAdjacentSeq> &first, const KmerPosition<T, IncludeAdjacentSeq> &second){
+        if(first.kmer < second.kmer)
+            return true;
+        if(second.kmer < first.kmer)
+            return false;
+        if(first.id < second.id)
+            return true;
+        if(second.id < first.id)
+            return false;
+        if(first.pos < second.pos)
+            return true;
+        if(second.pos < first.pos)
+            return false;
+        return false;
+    }
+
+    static bool compareKmerGroupAndIdAndDiag(const KmerPosition<T, IncludeAdjacentSeq> &first, const KmerPosition<T, IncludeAdjacentSeq> &second){
+        if(first.kmerGroup < second.kmerGroup)
+            return true;
+        if(second.kmerGroup < first.kmerGroup)
+            return false;
         if(first.kmer < second.kmer)
             return true;
         if(second.kmer < first.kmer)
