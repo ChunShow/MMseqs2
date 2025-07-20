@@ -76,6 +76,7 @@ int subtractdbs(int argc, const char **argv, const Command& command) {
 
             if (data != NULL) {
                 while (*data != '\0') {
+                    char *start = data; //gyuri
                     Util::parseKey(data, key);
                     unsigned int element = std::strtoul(key, NULL, 10);
                     double evalue = 0.0;
@@ -87,6 +88,7 @@ int subtractdbs(int argc, const char **argv, const Command& command) {
                         elementLookup[element] = false;
                     }
                     data = Util::skipLine(data);
+                    result.append(start, data - start); //gyuri
                 }
             }
             // write only elementLookup that are not found in rightDbr (id != UINT_MAX)
@@ -97,7 +99,7 @@ int subtractdbs(int argc, const char **argv, const Command& command) {
                     data = Util::skipLine(data);
                     Util::parseKey(start, key);
                     unsigned int elementIdx = std::strtoul(key, NULL, 10);
-                    if (elementLookup[elementIdx]) {
+                    if (elementLookup[elementIdx]) { // unique in left
                         result.append(start, data - start);
                     }
                 }

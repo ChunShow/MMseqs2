@@ -246,7 +246,6 @@ int doRescorediagonal(Parameters &par,
                     int alnLen = 0;
                     float targetCov = static_cast<float>(diagonalLen) / static_cast<float>(dbLen);
                     float queryCov = static_cast<float>(diagonalLen) / static_cast<float>(origQueryLen);
-
                     Matcher::result_t result;
                     if (par.rescoreMode == Parameters::RESCORE_MODE_HAMMING) {
                         int idCnt = (static_cast<float>(distance));
@@ -310,16 +309,41 @@ int doRescorediagonal(Parameters &par,
 
                     //float maxSeqLen = std::max(static_cast<float>(targetLen), static_cast<float>(queryLen));
                     float currScorePerCol = static_cast<float>(distance) / static_cast<float>(diagonalLen);
+                    // if (par.rescoreMode == Parameters::RESCORE_MODE_SUBSTITUTION) {
+                    //     std::cout << "queryId: " << queryId << " targetId: " << targetId
+                    //             << "queryKey: " << queryKey << " targetLen: " << targetLength
+                    //             << " distance: " << distance << " diagonalLen: " << diagonalLen
+                    //             << " diagonal: " << diagonal 
+                    //             << std::endl;
+                    //     std::cout << "currScorePerCol: " << currScorePerCol
+                    //             << " scorePerColThr: " << scorePerColThr
+                    //             << " alnLen: " << alnLen
+                    //             << std::endl;
+                    // }
                     // query/target cov mode
                     bool hasCov = Util::hasCoverage(par.covThr, par.covMode, queryCov, targetCov);
                     // --min-seq-id
                     bool hasSeqId = seqId >= (par.seqIdThr - std::numeric_limits<float>::epsilon());
+                    // // gyuri
+                    // if (par.rescoreMode == Parameters::RESCORE_MODE_SUBSTITUTION) {
+                        // std::cout << "seqId: " << seqId << "hasSeqId: " << hasSeqId << " par.seqIdThr: " << par.seqIdThr << std::endl;
+                    // }
                     bool hasEvalue = (evalue <= par.evalThr);
                     bool hasAlnLen = (alnLen >= par.alnLenThr);
 
                     // --filter-hits
                     bool hasToFilter = (par.filterHits == true && currScorePerCol >= scorePerColThr);
-                    if (isIdentity || hasToFilter || (hasAlnLen && hasCov && hasSeqId && hasEvalue)) {
+                    // if (isIdentity || hasToFilter || (hasAlnLen && hasCov && hasSeqId && hasEvalue)) {
+                    if (isIdentity || (hasAlnLen && hasCov && hasSeqId && hasEvalue)) { // gyuri
+                        // if (par.rescoreMode == Parameters::RESCORE_MODE_SUBSTITUTION) {
+                        //     std::cout << "yes" << " isIdentity: " << isIdentity
+                        //             << " hasToFilter: " << hasToFilter
+                        //             << " hasAlnLen: " << hasAlnLen
+                        //             << " hasCov: " << hasCov
+                        //             << " hasSeqId: " << hasSeqId
+                        //             << " hasEvalue: " << hasEvalue
+                        //             << std::endl;
+                        // } // gyuri
                         if (par.rescoreMode == Parameters::RESCORE_MODE_ALIGNMENT ||
                             par.rescoreMode == Parameters::RESCORE_MODE_END_TO_END_ALIGNMENT ||
                             par.rescoreMode == Parameters::RESCORE_MODE_WINDOW_QUALITY_ALIGNMENT) {
@@ -338,7 +362,23 @@ int doRescorediagonal(Parameters &par,
                             hit.diagonal = diagonal;
                             shortResults.emplace_back(hit);
                         }
-                    }
+                    } 
+                    // else {
+                    //     if (!hasAlnLen) {
+                    //         std::cout << "not hasAlnLen" << std::endl;
+                    //     }
+                    //     if (!hasCov) {
+                    //         std::cout << "not hasCov" << std::endl;
+                    //     }
+                    //     if (!hasSeqId) {
+                    //         std::cout << "not hasSeqId" << std::endl;
+                    //     }
+                    //     if (!hasEvalue) {
+                    //         std::cout << "not hasEvalue" << std::endl;
+                    //     }
+                        
+                    // }
+                        
                 }
 
                 if (par.sortResults > 0 && alnResults.size() > 1) {

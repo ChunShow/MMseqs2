@@ -113,7 +113,9 @@ int linclust(int argc, const char **argv, const Command& command) {
     // set it back to old value
     par.covThr = prevCov;
     par.seqIdThr = prevSeqId;
-    par.rescoreMode = Parameters::RESCORE_MODE_SUBSTITUTION;
+    // par.rescoreMode = Parameters::RESCORE_MODE_SUBSTITUTION; //orig
+    // par.rescoreMode = Parameters::RESCORE_MODE_WINDOW_QUALITY_ALIGNMENT; // gyuri test
+    par.rescoreMode = Parameters::RESCORE_MODE_ALIGNMENT;
 
     // # 3. Ungapped alignment filtering
     par.filterHits = true;
