@@ -319,6 +319,9 @@ std::pair<size_t, size_t> fillKmerPositionArray(KmerPosition<T, IncludeAdjacentS
                                 // store adjacent sequence information
                                 unsigned int startPos = (kmers + kmerIdx)->pos;
                                 unsigned int endPos = (kmers + kmerIdx)->pos + seq.getEffectiveKmerSize() - 1;
+                                for (size_t i = 0; i < 6; i++) {
+                                    threadKmerBuffer[bufferPos].setAdjacentSeq(i, xIndex);
+                                }
                                 if (startPos >= 3) {
                                     threadKmerBuffer[bufferPos].setAdjacentSeq(0, seq.numSequence[startPos]);
                                     threadKmerBuffer[bufferPos].setAdjacentSeq(1, seq.numSequence[startPos]);
@@ -520,8 +523,7 @@ KmerPosition<T, IncludeAdjacentSeq> * doComputation(size_t totalKmers, size_t ha
         Debug(Debug::INFO) << "\n";
         par.extraMemoryScale = std::round(1.1 * static_cast<float>(writePos) / static_cast<float>(elementsToSort) * 1000.0f) / 1000.0f;
         delete [] hashSeqPair;
-        hashSeqPair = NULL;
-        return hashSeqPair;
+        return NULL;
     }
 
     // sort by rep. sequence (stored in kmer) and sequence id
@@ -574,12 +576,8 @@ size_t assignGroup(KmerPosition<T, IncludeAdjacentSeq> *hashSeqPair, size_t spli
     size_t repSeqNum = 1;
     unsigned char repAdjacent[6];
     if (IncludeAdjacentSeq) {
-        if (splitFile == "RESIZE") {
-            repSeqNum = 1;
-        } else {
-            repSeqNum = 1;
-        }
-        for (size_t i = 0; i < repSeqNum; i++) {
+        repSeqNum = 5;
+        for (size_t i = 0; i < 6; i++) {
             repAdjacent[i] = hashSeqPair[0].getAdjacentSeq(i);
         }
     }
@@ -753,9 +751,9 @@ size_t assignGroup(KmerPosition<T, IncludeAdjacentSeq> *hashSeqPair, size_t spli
     }
 
     if (IncludeAdjacentSeq) {
-        // if (splitFile == "RESIZE") {
-        //     return writeExtraPos;
-        // }
+        if (splitFile == "RESIZE") {
+            return writeExtraPos;
+        }
         // re-order hashSeqPair
         for (size_t i = 0; i < writeExtraPos; i++) {
             hashSeqPair[writePos + i] = hashSeqPair[extraMemoryPos + i];
