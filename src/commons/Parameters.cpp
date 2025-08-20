@@ -2595,6 +2595,7 @@ void Parameters::setDefaults() {
     weightFile = "";
     includeAdjacentSeq = true;
     extraMemoryScale = 0.01;
+    partIndex = 0;
 
     // result2stats
     stat = "";
