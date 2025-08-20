@@ -572,7 +572,6 @@ public:
     std::string weightFile;
     bool includeAdjacentSeq;
     float extraMemoryScale;
-    int partIndex;
 
     // indexdb
     int checkCompatible;
