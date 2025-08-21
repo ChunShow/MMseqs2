@@ -323,16 +323,13 @@ std::pair<size_t, size_t> fillKmerPositionArray(KmerPosition<T, IncludeAdjacentS
                                     threadKmerBuffer[bufferPos].setAdjacentSeq(i, xIndex);
                                 }
                                 if (startPos >= 3) {
-                                    threadKmerBuffer[bufferPos].setAdjacentSeq(0, seq.numSequence[startPos]);
-                                    threadKmerBuffer[bufferPos].setAdjacentSeq(1, seq.numSequence[startPos]);
-                                    threadKmerBuffer[bufferPos].setAdjacentSeq(2, seq.numSequence[startPos]);
+                                    threadKmerBuffer[bufferPos].setAdjacentSeq(0, seq.numSequence[startPos - 3]);
+                                    threadKmerBuffer[bufferPos].setAdjacentSeq(1, seq.numSequence[startPos - 2]);
+                                    threadKmerBuffer[bufferPos].setAdjacentSeq(2, seq.numSequence[startPos - 1]);
                                 }else if (startPos == 2) {
-                                    threadKmerBuffer[bufferPos].setAdjacentSeq(0, xIndex);
                                     threadKmerBuffer[bufferPos].setAdjacentSeq(1, seq.numSequence[startPos - 2]);
                                     threadKmerBuffer[bufferPos].setAdjacentSeq(2, seq.numSequence[startPos - 1]);
                                 }else if (startPos == 1) {
-                                    threadKmerBuffer[bufferPos].setAdjacentSeq(0, xIndex);
-                                    threadKmerBuffer[bufferPos].setAdjacentSeq(1, xIndex);
                                     threadKmerBuffer[bufferPos].setAdjacentSeq(2, seq.numSequence[startPos - 1]);
                                 }
                                 if (endPos + 3 <= static_cast<unsigned int>(seq.L) - 1) {
@@ -342,11 +339,8 @@ std::pair<size_t, size_t> fillKmerPositionArray(KmerPosition<T, IncludeAdjacentS
                                 }else if (endPos + 2 == static_cast<unsigned int>(seq.L) - 1) {
                                     threadKmerBuffer[bufferPos].setAdjacentSeq(3, seq.numSequence[endPos + 1]);
                                     threadKmerBuffer[bufferPos].setAdjacentSeq(4, seq.numSequence[endPos + 2]);
-                                    threadKmerBuffer[bufferPos].setAdjacentSeq(5, xIndex);
                                 }else if (endPos + 1 == static_cast<unsigned int>(seq.L) - 1) {
                                     threadKmerBuffer[bufferPos].setAdjacentSeq(3, seq.numSequence[endPos + 1]);
-                                    threadKmerBuffer[bufferPos].setAdjacentSeq(4, xIndex);
-                                    threadKmerBuffer[bufferPos].setAdjacentSeq(5, xIndex);
                                 }
                             }
                             bufferPos++;
