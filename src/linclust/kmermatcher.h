@@ -244,8 +244,8 @@ KmerPosition<T, IncludeAdjacentSeq> *initKmerPositionMemory(size_t size);
 
 template <int TYPE, typename T, bool IncludeAdjacentSeq = false>
 std::pair<size_t, size_t>  fillKmerPositionArray(KmerPosition<T, IncludeAdjacentSeq> * kmerArray, size_t kmerArraySize, DBReader<unsigned int> &seqDbr,
-                                                 Parameters & par, BaseMatrix * subMat, bool hashWholeSequence,
-                                                 size_t hashStartRange, size_t hashEndRange, size_t * hashDistribution);
+                                                 Parameters & par, BaseMatrix * subMat, bool hashWholeSequence, size_t hashStartRange,
+                                                 size_t hashEndRange, size_t * hashDistribution, bool useCountTable = false);
 
 
 void maskSequence(int maskMode, int maskLowerCase,

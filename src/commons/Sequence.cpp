@@ -31,7 +31,7 @@ Sequence::Sequence(size_t maxLen, int seqType, const BaseMatrix *subMat, const u
     this->aaPosInSpacedPattern = NULL;
     this->shouldAddPC = shouldAddPC;
     this->userSpacedKmerPattern = userSpacedKmerPattern;
-    this->kmerPatternCount = 1;
+    this->kmerPatternCount = 0;
     if(spacedPatternSize){
         simdKmerRegisterCnt = (kmerSize / (VECSIZE_INT*4)) + 1;
         unsigned int simdKmerLen =  simdKmerRegisterCnt *  (VECSIZE_INT*4); // for SIMD memory alignment
@@ -236,7 +236,7 @@ void Sequence::mapSequence(size_t id, unsigned int dbKey, const char *sequence, 
         EXIT(EXIT_FAILURE);
     }
     currItPos = -1;
-
+    kmerPatternCount = 0;
 }
 
 void Sequence::mapSequence(size_t id, unsigned int dbKey, std::pair<const unsigned char *,const unsigned int> data){
@@ -259,6 +259,7 @@ void Sequence::mapSequence(size_t id, unsigned int dbKey, std::pair<const unsign
         EXIT(EXIT_FAILURE);
     }
     currItPos = -1;
+    kmerPatternCount = 0;
 }
 
 void Sequence::mapProfile(const char * profileData, unsigned int seqLen){
