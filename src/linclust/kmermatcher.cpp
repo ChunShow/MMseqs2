@@ -462,8 +462,8 @@ template void swapCenterSequence<1, int, true>(KmerPosition<int, true> *kmers, s
 template void swapCenterSequence<1, int, false>(KmerPosition<int, false> *kmers, size_t splitKmerCount, SequenceWeights &seqWeights);
 
 template <typename T, bool IncludeAdjacentSeq>
-KmerPosition<T, IncludeAdjacentSeq> * doComputation(size_t totalKmers, size_t hashStartRange, size_t hashEndRange, std::string splitFile,
-                                                    DBReader<unsigned int> & seqDbr, Parameters & par, BaseMatrix  * subMat, int &partIndex) {
+KmerPosition<T, IncludeAdjacentSeq> * doComputation(size_t totalKmers, size_t hashStartRange, size_t hashEndRange, std::string splitFile, DBReader<unsigned int> & seqDbr,
+                                                    Parameters & par, BaseMatrix * subMat, int & partIndex, const std::vector<short> & countTable) {
 
     KmerPosition<T, IncludeAdjacentSeq> * hashSeqPair = initKmerPositionMemory<T, IncludeAdjacentSeq>(totalKmers);
     size_t elementsToSort;
@@ -506,14 +506,19 @@ KmerPosition<T, IncludeAdjacentSeq> * doComputation(size_t totalKmers, size_t ha
     // The longest sequence is the first since we sorted by kmer, seq.Len and id
     size_t writePos;
     if(Parameters::isEqualDbtype(seqDbr.getDbtype(), Parameters::DBTYPE_NUCLEOTIDES)){
-        writePos = assignGroup<Parameters::DBTYPE_NUCLEOTIDES, T, IncludeAdjacentSeq>(hashSeqPair, totalKmers, par.includeOnlyExtendable, par.covMode, par.covThr, sequenceWeights, par.weightThr, elementsToSort, subMat, splitFile, partIndex);
+        writePos = assignGroup<Parameters::DBTYPE_NUCLEOTIDES, T, IncludeAdjacentSeq>(hashSeqPair, totalKmers, par.includeOnlyExtendable, par.covMode, par.covThr, sequenceWeights,
+                                                                                      par.weightThr, elementsToSort, subMat, splitFile, partIndex, par.useCountTable, countTable);
     }else{
-        writePos = assignGroup<Parameters::DBTYPE_AMINO_ACIDS, T, IncludeAdjacentSeq>(hashSeqPair, totalKmers, par.includeOnlyExtendable, par.covMode, par.covThr, sequenceWeights, par.weightThr, elementsToSort, subMat, splitFile, partIndex);
-    }
+        writePos = assignGroup<Parameters::DBTYPE_AMINO_ACIDS, T, IncludeAdjacentSeq>(hashSeqPair, totalKmers, par.includeOnlyExtendable, par.covMode, par.covThr, sequenceWeights,
+                                                                                      par.weightThr, elementsToSort, subMat, splitFile, partIndex, par.useCountTable, countTable);
+        }
 
     delete sequenceWeights;
 
-    if (splitFile == "RESIZE") {
+    if (splitFile == "COUNT_TABLE") {
+        return hashSeqPair;
+    }
+    else if (splitFile == "RESIZE") {
         Debug(Debug::INFO) << "\n";
         par.extraMemoryScale = std::round(1.1 * static_cast<float>(writePos) / static_cast<float>(elementsToSort) * 1000.0f) / 1000.0f;
         delete [] hashSeqPair;
@@ -549,8 +554,8 @@ KmerPosition<T, IncludeAdjacentSeq> * doComputation(size_t totalKmers, size_t ha
 
 
 template <int TYPE, typename T, bool IncludeAdjacentSeq>
-size_t assignGroup(KmerPosition<T, IncludeAdjacentSeq> *hashSeqPair, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr,
-                   SequenceWeights * sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile, int &partIndex) {
+size_t assignGroup(KmerPosition<T, IncludeAdjacentSeq> *hashSeqPair, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights * sequenceWeights, 
+                   float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile, int &partIndex, bool useCountTable, const std::vector<short> &countTable) {
     size_t writePos=0;
     size_t prevHash = hashSeqPair[0].kmer;
     size_t repSeqId = hashSeqPair[0].id;
@@ -568,13 +573,19 @@ size_t assignGroup(KmerPosition<T, IncludeAdjacentSeq> *hashSeqPair, size_t spli
     // for adjacent sequences
     size_t writeExtraPos = 0;
     size_t repSeqNum = 1;
+    size_t adjacentRepSeqs = 0;
+    size_t countTableRepSeqs = 0;
     unsigned char repAdjacent[6];
-    if (IncludeAdjacentSeq) {
-        repSeqNum = 5;
+    if (IncludeAdjacentSeq && splitFile != "COUNT_TABLE") {
+        adjacentRepSeqs = 4;
         for (size_t i = 0; i < 6; i++) {
             repAdjacent[i] = hashSeqPair[0].getAdjacentSeq(i);
         }
     }
+    if (useCountTable) {
+        countTableRepSeqs = 3;
+    }
+    repSeqNum += adjacentRepSeqs + countTableRepSeqs;
     for (size_t elementIdx = 0; elementIdx < extraMemoryPos; elementIdx++) {
         size_t currKmer = hashSeqPair[elementIdx].kmer;
         if(TYPE == Parameters::DBTYPE_NUCLEOTIDES){
@@ -582,11 +593,14 @@ size_t assignGroup(KmerPosition<T, IncludeAdjacentSeq> *hashSeqPair, size_t spli
         }
         if (prevHash != currKmer) {
             size_t adjacentRepIdx = prevHashStart;
+            size_t maxCntIdx = prevHashStart;
+            bool adjacentCompleted = false;
             std::vector<unsigned int> selectedRepIds;
             for (size_t j = 0; j < repSeqNum; j++) {
                 int adjacentScore = 0;
                 int scoreThreshold = 0;
-                if (IncludeAdjacentSeq) {
+                short maxCnt = 0;
+                if (IncludeAdjacentSeq && !adjacentCompleted && splitFile != "COUNT_TABLE") {
                     repSeqId = hashSeqPair[adjacentRepIdx].id;
                     if(TYPE == Parameters::DBTYPE_NUCLEOTIDES){
                         repIsReverse = (BIT_CHECK(hashSeqPair[adjacentRepIdx].kmer, 63) == 0);
@@ -599,6 +613,15 @@ size_t assignGroup(KmerPosition<T, IncludeAdjacentSeq> *hashSeqPair, size_t spli
                         adjacentScore += subMat->subMatrix[repAdjacent[k]][repAdjacent[k]];
                     }
                     scoreThreshold = adjacentScore;
+                    selectedRepIds.push_back(repSeqId);
+                }else if (useCountTable && adjacentCompleted) {
+                    repSeqId = hashSeqPair[maxCntIdx].id;
+                    if(TYPE == Parameters::DBTYPE_NUCLEOTIDES){
+                        repIsReverse = (BIT_CHECK(hashSeqPair[maxCntIdx].kmer, 63) == 0);
+                        repSeqId = (repIsReverse) ? repSeqId : BIT_SET(repSeqId, 63);
+                    }
+                    queryLen = hashSeqPair[maxCntIdx].seqLen;
+                    repSeq_i_pos = hashSeqPair[maxCntIdx].pos;
                     selectedRepIds.push_back(repSeqId);
                 }
 
@@ -665,14 +688,14 @@ size_t assignGroup(KmerPosition<T, IncludeAdjacentSeq> *hashSeqPair, size_t spli
                         }
     //                    std::cout << diagonal << "\t" << repSeq_i_pos << "\t" << hashSeqPair[i].pos << std::endl;
 
-                        if (IncludeAdjacentSeq) {
+                        if (IncludeAdjacentSeq && !adjacentCompleted && splitFile != "COUNT_TABLE") {
                             int currScore = 0;
                             for (size_t k = 0; k < 6; k++) {
                                 currScore += subMat->subMatrix[repAdjacent[k]][hashSeqPair[i].getAdjacentSeq(k)];
                             }
                             if (currScore <= adjacentScore && adjacentRepIdx < i) {
                                 bool isDuplicate = false;
-                                for (size_t k = 0; k < j + 1; k++) {
+                                for (size_t k = 0; k < selectedRepIds.size(); k++) {
                                     if (selectedRepIds[k] == hashSeqPair[i].id) {
                                         isDuplicate = true;
                                         break;
@@ -684,13 +707,26 @@ size_t assignGroup(KmerPosition<T, IncludeAdjacentSeq> *hashSeqPair, size_t spli
                                 }
                             }
                         }
+                        if (useCountTable && maxCnt < countTable[hashSeqPair[i].id]) {
+                            bool isDuplicate = false;
+                            for (size_t k = 0; k < selectedRepIds.size(); k++) {
+                                if (selectedRepIds[k] == hashSeqPair[i].id) {
+                                    isDuplicate = true;
+                                    break;
+                                }
+                            }
+                            if (!isDuplicate) {
+                                maxCnt = countTable[hashSeqPair[i].id];
+                                maxCntIdx = i;
+                            }
+                        }
 
                         bool canBeExtended = diagonal < 0 || (diagonal > (queryLen - hashSeqPair[i].seqLen));
                         bool canBecovered = Util::canBeCovered(covThr, covMode,
                                                             static_cast<float>(queryLen),
                                                             static_cast<float>(hashSeqPair[i].seqLen));
                         if((includeOnlyExtendable == false && canBecovered) || (canBeExtended && includeOnlyExtendable ==true )){
-                            if (!IncludeAdjacentSeq) {
+                            if (!IncludeAdjacentSeq || splitFile == "COUNT_TABLE") {
                                 hashSeqPair[writePos].kmer = rId;
                                 hashSeqPair[writePos].pos = diagonal;
                                 hashSeqPair[writePos].seqLen = hashSeqPair[i].seqLen;
@@ -742,8 +778,13 @@ size_t assignGroup(KmerPosition<T, IncludeAdjacentSeq> *hashSeqPair, size_t spli
 //                hashSeqPair[i].kmer = SIZE_T_MAX;
 //                hashSeqPair[i].kmer = (i != writePos - 1) ? SIZE_T_MAX : hashSeqPair[i].kmer;
                 }
-                if (adjacentScore == scoreThreshold) {
-                    break;
+                if (j == adjacentRepSeqs ||
+                   (!adjacentCompleted && adjacentScore == scoreThreshold)) {
+                    j = adjacentRepSeqs;
+                    adjacentCompleted = true;
+                }
+                if (adjacentCompleted) {
+                    if (!useCountTable || maxCnt == 0) break;
                 }
             }
             prevSetSize = 0;
@@ -767,7 +808,7 @@ size_t assignGroup(KmerPosition<T, IncludeAdjacentSeq> *hashSeqPair, size_t spli
             skipByWeightCount++;
     }
 
-    if (IncludeAdjacentSeq) {
+    if (IncludeAdjacentSeq && splitFile != "COUNT_TABLE") {
         if (splitFile == "RESIZE") {
             return writeExtraPos;
         }
@@ -783,14 +824,14 @@ size_t assignGroup(KmerPosition<T, IncludeAdjacentSeq> *hashSeqPair, size_t spli
     return writePos;
 }
 
-template size_t assignGroup<0, short, true>(KmerPosition<short, true> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile, int &partIndex);
-template size_t assignGroup<0, short, false>(KmerPosition<short, false> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile, int &partIndex);
-template size_t assignGroup<0, int, true>(KmerPosition<int, true> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile, int &partIndex);
-template size_t assignGroup<0, int, false>(KmerPosition<int, false> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile, int &partIndex);
-template size_t assignGroup<1, short, true>(KmerPosition<short, true> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile, int &partIndex);
-template size_t assignGroup<1, short, false>(KmerPosition<short, false> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile, int &partIndex);
-template size_t assignGroup<1, int, true>(KmerPosition<int, true> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile, int &partIndex);
-template size_t assignGroup<1, int, false>(KmerPosition<int, false> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile, int &partIndex);
+template size_t assignGroup<0, short, true>(KmerPosition<short, true> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile, int &partIndex, bool useCountTable, const std::vector<short> &countTable);
+template size_t assignGroup<0, short, false>(KmerPosition<short, false> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile, int &partIndex, bool useCountTable, const std::vector<short> &countTable);
+template size_t assignGroup<0, int, true>(KmerPosition<int, true> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile, int &partIndex, bool useCountTable, const std::vector<short> &countTable);
+template size_t assignGroup<0, int, false>(KmerPosition<int, false> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile, int &partIndex, bool useCountTable, const std::vector<short> &countTable);
+template size_t assignGroup<1, short, true>(KmerPosition<short, true> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile, int &partIndex, bool useCountTable, const std::vector<short> &countTable);
+template size_t assignGroup<1, short, false>(KmerPosition<short, false> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile, int &partIndex, bool useCountTable, const std::vector<short> &countTable);
+template size_t assignGroup<1, int, true>(KmerPosition<int, true> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile, int &partIndex, bool useCountTable, const std::vector<short> &countTable);
+template size_t assignGroup<1, int, false>(KmerPosition<int, false> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile, int &partIndex, bool useCountTable, const std::vector<short> &countTable);
 
 
 void setLinearFilterDefault(Parameters *p) {
@@ -858,13 +899,45 @@ int kmermatcherInner(Parameters& par, DBReader<unsigned int>& seqDbr) {
                                          static_cast<size_t>(std::min(totalSizeNeeded, memoryLimit)/sizeof(KmerPosition<T, IncludeAdjacentSeq>))+1);
     
     std::vector<std::pair<size_t, size_t>> hashRanges;
-    if (IncludeAdjacentSeq) {
+    // if enough memory is available, allocate and fill countTable
+    std::vector<short> countTable;
+    if (par.includeCountTable) {
+        if (memoryLimit > 2 * seqDbr.getSize() && splits < 0.7 * par.kmersPerSequence) {
+            countTable.assign(seqDbr.getSize(), 0);
+
+            memoryLimit -= countTable.size();
+            splits = static_cast<size_t>(std::ceil((totalSizeNeeded * par.countTableScale) / memoryLimit));
+            totalKmersPerSplit = std::max(static_cast<size_t>(1024+1),
+                                          static_cast<size_t>((totalSizeNeeded * par.countTableScale / splits)/sizeof(KmerPosition<T, IncludeAdjacentSeq>))+1);
+
+            hashRanges = setupCountTable<T, IncludeAdjacentSeq>(par, subMat, seqDbr, totalKmersPerSplit, splits, hashDist, static_cast<size_t>(totalKmers * par.countTableScale));
+            KmerPosition<T, IncludeAdjacentSeq> *hashSeqPair = NULL;
+            for(size_t split = 0; split < hashRanges.size(); split++) {
+                Debug(Debug::INFO) << "Fill count table for " << (split+1) <<" split\n";
+                int partIndex = 0;
+                hashSeqPair = doComputation<T, IncludeAdjacentSeq>(totalKmersPerSplit, hashRanges[split].first, hashRanges[split].second, "COUNT_TABLE", seqDbr, par, subMat, partIndex, countTable);
+                for (size_t i = 0; i < totalKmersPerSplit && hashSeqPair[i].kmer != SIZE_T_MAX; i++) {
+                    countTable[hashSeqPair[i].id]++;
+                }
+                delete [] hashSeqPair;
+            }
+            Debug(Debug::INFO) << "\n";
+            hashRanges.clear();
+            par.useCountTable = true;
+
+            splits = static_cast<size_t>(std::ceil(static_cast<float>(totalSizeNeeded) / memoryLimit));
+            totalKmersPerSplit = std::max(static_cast<size_t>(1024+1),
+                                          static_cast<size_t>(std::min(totalSizeNeeded, memoryLimit)/sizeof(KmerPosition<T, IncludeAdjacentSeq>))+1);
+        }
+    }
+
+    if (par.includeCountTable || IncludeAdjacentSeq) {
         // calculate extra memory for resizing
         std::pair<size_t, size_t> resizeRange = setupResize<T, IncludeAdjacentSeq>(par, subMat, seqDbr, totalKmersPerSplit, splits, hashDist);
         Debug(Debug::INFO) << "Resize extra memory\n";
         float extraMemoryScale = par.extraMemoryScale;
         int partIndex = 0;
-        doComputation<T, IncludeAdjacentSeq>(totalKmersPerSplit, resizeRange.first, resizeRange.second, "RESIZE", seqDbr, par, subMat, partIndex);
+        doComputation<T, IncludeAdjacentSeq>(totalKmersPerSplit, resizeRange.first, resizeRange.second, "RESIZE", seqDbr, par, subMat, partIndex, countTable);
         if (par.extraMemoryScale > extraMemoryScale){
             extraMemoryScale = par.extraMemoryScale;
         }
@@ -908,7 +981,7 @@ int kmermatcherInner(Parameters& par, DBReader<unsigned int>& seqDbr) {
     for(size_t split = fromSplit; split < fromSplit+splitCount; split++) {
         int partIndex = 0;
         std::string splitFileName = par.db2 + "_split_" +SSTR(split);
-        hashSeqPair = doComputation<T, IncludeAdjacentSeq>(totalKmersPerSplit, hashRanges[split].first, hashRanges[split].second, splitFileName, seqDbr, par, subMat, partIndex);
+        hashSeqPair = doComputation<T, IncludeAdjacentSeq>(totalKmersPerSplit, hashRanges[split].first, hashRanges[split].second, splitFileName, seqDbr, par, subMat, partIndex, countTable);
         partIndices[split] = partIndex;
     }
     MPI_Barrier(MPI_COMM_WORLD);
@@ -931,7 +1004,7 @@ int kmermatcherInner(Parameters& par, DBReader<unsigned int>& seqDbr) {
         std::string splitFileNameDone = splitFileName + ".done";
         if(FileUtil::fileExists(splitFileNameDone.c_str()) == false){
             int partIndex = 0;
-            hashSeqPair = doComputation<T, IncludeAdjacentSeq>(totalKmersPerSplit, hashRanges[split].first, hashRanges[split].second, splitFileName, seqDbr, par, subMat, partIndex);
+            hashSeqPair = doComputation<T, IncludeAdjacentSeq>(totalKmersPerSplit, hashRanges[split].first, hashRanges[split].second, splitFileName, seqDbr, par, subMat, partIndex, countTable);
 
             if (IncludeAdjacentSeq && partIndex > 0) {
                 for (int idx = 0; idx < partIndex; idx++) {
@@ -1051,9 +1124,9 @@ std::vector<std::pair<size_t, size_t>> setupKmerSplits(Parameters &par, BaseMatr
 }
 
 template <typename T, bool IncludeAdjacentSeq>
-std::pair<size_t, size_t> setupResize(Parameters &par, BaseMatrix * subMat, DBReader<unsigned int> &seqDbr, size_t totalKmers, size_t splits, size_t * hashDist){
-    std::pair<size_t, size_t> resizeRange;
-    Debug(Debug::INFO) << "Initiating resizing stage\n";
+std::vector<std::pair<size_t, size_t>> setupCountTable(Parameters &par, BaseMatrix * subMat, DBReader<unsigned int> &seqDbr, size_t totalKmersPerSplit, size_t splits, size_t * hashDist, size_t totalKmers){
+    std::vector<std::pair<size_t, size_t>> hashRanges;
+    Debug(Debug::INFO) << "Initiating count table\n";
     // compute exact k-mer dist
     if(Parameters::isEqualDbtype(seqDbr.getDbtype(), Parameters::DBTYPE_NUCLEOTIDES)){
         fillKmerPositionArray<Parameters::DBTYPE_NUCLEOTIDES, T, IncludeAdjacentSeq>(NULL, SIZE_T_MAX, seqDbr, par, subMat, true, 0, SIZE_T_MAX, hashDist);
@@ -1069,9 +1142,54 @@ std::pair<size_t, size_t> setupResize(Parameters &par, BaseMatrix * subMat, DBRe
                 maxBucketSize = hashDist[i];
             }
         }
-        if(maxBucketSize > totalKmers){
+        if(maxBucketSize > totalKmersPerSplit){
             Debug(Debug::INFO) << "Not enough memory to run the kmermatcher. Minimum is at least " << maxBucketSize* sizeof(KmerPosition<T, IncludeAdjacentSeq>) << " bytes\n";
             EXIT(EXIT_FAILURE);
+        }
+    }
+    size_t currBucketSize = 0;
+    size_t currBucketStart = 0;
+    size_t totalBucketSize = 0;
+    for(size_t i = 0; i < (USHRT_MAX+1); i++){
+        if(totalBucketSize+hashDist[i] >= totalKmers){
+            hashRanges.emplace_back(currBucketStart, i - 1);
+            break;
+        }
+        if(currBucketSize+hashDist[i] >= totalKmersPerSplit){
+            hashRanges.emplace_back(currBucketStart, i - 1);
+            currBucketSize = 0;
+            currBucketStart = i;
+        }
+        currBucketSize+=hashDist[i];
+        totalBucketSize+=hashDist[i];
+    }
+    return hashRanges;
+}
+
+template <typename T, bool IncludeAdjacentSeq>
+std::pair<size_t, size_t> setupResize(Parameters &par, BaseMatrix * subMat, DBReader<unsigned int> &seqDbr, size_t totalKmers, size_t splits, size_t * hashDist){
+    std::pair<size_t, size_t> resizeRange;
+    if (!par.useCountTable) {
+        Debug(Debug::INFO) << "Initiating resizing stage\n";
+        // compute exact k-mer dist
+        if(Parameters::isEqualDbtype(seqDbr.getDbtype(), Parameters::DBTYPE_NUCLEOTIDES)){
+            fillKmerPositionArray<Parameters::DBTYPE_NUCLEOTIDES, T, IncludeAdjacentSeq>(NULL, SIZE_T_MAX, seqDbr, par, subMat, true, 0, SIZE_T_MAX, hashDist);
+        }else{
+            fillKmerPositionArray<Parameters::DBTYPE_AMINO_ACIDS, T, IncludeAdjacentSeq>(NULL, SIZE_T_MAX, seqDbr, par, subMat, true, 0, SIZE_T_MAX, hashDist);
+        }
+        seqDbr.remapData();
+        if (splits > 1) {
+            // figure out if machine has enough memory to run this job
+            size_t maxBucketSize = 0;
+            for(size_t i = 0; i < (USHRT_MAX+1); i++) {
+                if(maxBucketSize < hashDist[i]){
+                    maxBucketSize = hashDist[i];
+                }
+            }
+            if(maxBucketSize > totalKmers){
+                Debug(Debug::INFO) << "Not enough memory to run the kmermatcher. Minimum is at least " << maxBucketSize* sizeof(KmerPosition<T, IncludeAdjacentSeq>) << " bytes\n";
+                EXIT(EXIT_FAILURE);
+            }
         }
     }
     // define partial split for resizing
@@ -1607,6 +1725,11 @@ template std::vector<std::pair<size_t, size_t>>  setupKmerSplits<short, true>(Pa
 template std::vector<std::pair<size_t, size_t>>  setupKmerSplits<short, false>(Parameters &par, BaseMatrix * subMat, DBReader<unsigned int> &seqDbr, size_t totalKmers, size_t splits);
 template std::vector<std::pair<size_t, size_t>>  setupKmerSplits<int, true>(Parameters &par, BaseMatrix * subMat, DBReader<unsigned int> &seqDbr, size_t totalKmers, size_t splits);
 template std::vector<std::pair<size_t, size_t>>  setupKmerSplits<int, false>(Parameters &par, BaseMatrix * subMat, DBReader<unsigned int> &seqDbr, size_t totalKmers, size_t splits);
+
+template std::vector<std::pair<size_t, size_t>>  setupCountTable<short, true>(Parameters &par, BaseMatrix * subMat, DBReader<unsigned int> &seqDbr, size_t totalKmersPerSplit, size_t splits, size_t * hashDist, size_t totalKmers);
+template std::vector<std::pair<size_t, size_t>>  setupCountTable<short, false>(Parameters &par, BaseMatrix * subMat, DBReader<unsigned int> &seqDbr, size_t totalKmersPerSplit, size_t splits, size_t * hashDist, size_t totalKmers);
+template std::vector<std::pair<size_t, size_t>>  setupCountTable<int, true>(Parameters &par, BaseMatrix * subMat, DBReader<unsigned int> &seqDbr, size_t totalKmersPerSplit, size_t splits, size_t * hashDist, size_t totalKmers);
+template std::vector<std::pair<size_t, size_t>>  setupCountTable<int, false>(Parameters &par, BaseMatrix * subMat, DBReader<unsigned int> &seqDbr, size_t totalKmersPerSplit, size_t splits, size_t * hashDist, size_t totalKmers);
 
 template std::pair<size_t, size_t>  setupResize<short, true>(Parameters &par, BaseMatrix * subMat, DBReader<unsigned int> &seqDbr, size_t totalKmers, size_t splits, size_t * hashDist);
 template std::pair<size_t, size_t>  setupResize<short, false>(Parameters &par, BaseMatrix * subMat, DBReader<unsigned int> &seqDbr, size_t totalKmers, size_t splits, size_t * hashDist);

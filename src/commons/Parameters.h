@@ -570,6 +570,9 @@ public:
     int resultDirection;
     float weightThr;
     std::string weightFile;
+    bool includeCountTable;
+    float countTableScale;
+    bool useCountTable;
     bool includeAdjacentSeq;
     float extraMemoryScale;
 

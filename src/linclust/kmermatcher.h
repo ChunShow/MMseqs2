@@ -258,6 +258,9 @@ template <typename T, bool IncludeAdjacentSeq = true>
 std::vector<std::pair<size_t, size_t>> setupKmerSplits(Parameters &par, BaseMatrix * subMat, DBReader<unsigned int> &seqDbr, size_t totalKmers, size_t splits);
 
 template <typename T, bool IncludeAdjacentSeq = true>
+std::vector<std::pair<size_t, size_t>> setupCountTable(Parameters &par, BaseMatrix * subMat, DBReader<unsigned int> &seqDbr, size_t totalKmersPerSplit, size_t splits, size_t * hashDist, size_t totalKmers);
+
+template <typename T, bool IncludeAdjacentSeq = true>
 std::pair<size_t, size_t> setupResize(Parameters &par, BaseMatrix * subMat, DBReader<unsigned int> &seqDbr, size_t totalKmers, size_t splits, size_t * hashDist);
 
 std::vector<std::pair<size_t, size_t>> setupResizedSplits(size_t totalKmers, size_t splits, size_t * hashDist);

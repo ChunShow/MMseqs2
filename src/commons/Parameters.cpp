@@ -2593,6 +2593,9 @@ void Parameters::setDefaults() {
     resultDirection = Parameters::PARAM_RESULT_DIRECTION_TARGET;
     weightThr = 0.9;
     weightFile = "";
+    includeCountTable = true;
+    countTableScale = 0.1;
+    useCountTable = false;
     includeAdjacentSeq = true;
     extraMemoryScale = 0.01;
 
