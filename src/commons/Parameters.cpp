@@ -96,6 +96,8 @@ Parameters::Parameters():
         PARAM_CLUSTER_STEPS(PARAM_CLUSTER_STEPS_ID, "--cluster-steps", "Cascaded clustering steps", "Cascaded clustering steps from 1 to -s", typeid(int), (void *) &clusterSteps, "^[1-9]{1}$", MMseqsParameter::COMMAND_CLUST | MMseqsParameter::COMMAND_EXPERT),
         PARAM_CASCADED(PARAM_CASCADED_ID, "--single-step-clustering", "Single step clustering", "Switch from cascaded to simple clustering workflow", typeid(bool), (void *) &singleStepClustering, "", MMseqsParameter::COMMAND_CLUST),
         PARAM_CLUSTER_REASSIGN(PARAM_CLUSTER_REASSIGN_ID, "--cluster-reassign", "Cluster reassign", "Cascaded clustering can cluster sequence that do not fulfill the clustering criteria.\nCluster reassignment corrects these errors", typeid(bool), (void *) &clusterReassignment, "", MMseqsParameter::COMMAND_CLUST),
+        PARAM_CLUSTER_SET_MODE(PARAM_CLUSTER_SET_MODE_ID, "--set-mode", "Set mode", "0: Cluster by each entry\n1: Cluster by set", typeid(bool), (void *) &clusteringSetMode, "[0-1]{1}$", MMseqsParameter::COMMAND_CLUST),
+        PARAM_CLUSTER_MODULE(PARAM_CLUSTER_MODULE_ID, "--cluster-module", "Cluster module", "0: Linclust\n1: Clust", typeid(int), (void *) &clusterModule, "^[0-1]{1}$", MMseqsParameter::COMMAND_CLUST | MMseqsParameter::COMMAND_CLUST),
         // affinity clustering
         PARAM_MAXITERATIONS(PARAM_MAXITERATIONS_ID, "--max-iterations", "Max connected component depth", "Maximum depth of breadth first search in connected component clustering", typeid(int), (void *) &maxIteration, "^[1-9]{1}[0-9]*$", MMseqsParameter::COMMAND_CLUST | MMseqsParameter::COMMAND_EXPERT),
         PARAM_SIMILARITYSCORE(PARAM_SIMILARITYSCORE_ID, "--similarity-type", "Similarity type", "Type of score used for clustering. 1: alignment score 2: sequence identity", typeid(int), (void *) &similarityScoreType, "^[1-2]{1}$", MMseqsParameter::COMMAND_CLUST | MMseqsParameter::COMMAND_EXPERT),
@@ -196,13 +198,13 @@ Parameters::Parameters():
         // indexdb
         PARAM_CHECK_COMPATIBLE(PARAM_CHECK_COMPATIBLE_ID, "--check-compatible", "Check compatible", "0: Always recreate index, 1: Check if recreating index is needed, 2: Fail if index is incompatible", typeid(int), (void *) &checkCompatible, "^[0-2]{1}$", MMseqsParameter::COMMAND_MISC),
         PARAM_SEARCH_TYPE(PARAM_SEARCH_TYPE_ID, "--search-type", "Search type", "Search type 0: auto 1: amino acid, 2: translated, 3: nucleotide, 4: translated nucleotide alignment", typeid(int), (void *) &searchType, "^[0-4]{1}"),
-        PARAM_INDEX_SUBSET(PARAM_INDEX_SUBSET_ID, "--index-subset", "Index subset", "Create specialized index with subset of entries\n0: normal index\n1: index without headers\n2: index without prefiltering data\n4: index without aln (for cluster db)\nFlags can be combined bit wise", typeid(int), (void *) &indexSubset, "^[0-7]{1}", MMseqsParameter::COMMAND_EXPERT),
+        PARAM_INDEX_SUBSET(PARAM_INDEX_SUBSET_ID, "--index-subset", "Index subset", "Create specialized index with subset of entries\n0: normal index\n1: index without headers\n2: index without prefiltering data\n4: index without aln (for cluster db)\n8: no sequence lookup (good for GPU only searches)\nFlags can be combined bit wise", typeid(int), (void *) &indexSubset, "^[0-9]{1}[0-9]*$", MMseqsParameter::COMMAND_EXPERT),
         PARAM_INDEX_DBSUFFIX(PARAM_INDEX_DBSUFFIX_ID, "--index-dbsuffix", "Index dbsuffix", "A suffix of the db (used for cluster dbs)", typeid(std::string), (void *) &indexDbsuffix, "", MMseqsParameter::COMMAND_HIDDEN),
         // createdb
         PARAM_USE_HEADER(PARAM_USE_HEADER_ID, "--use-fasta-header", "Use fasta header", "Use the id parsed from the fasta header as the index key instead of using incrementing numeric identifiers", typeid(bool), (void *) &useHeader, ""),
         PARAM_ID_OFFSET(PARAM_ID_OFFSET_ID, "--id-offset", "Offset of numeric ids", "Numeric ids in index file are offset by this value", typeid(int), (void *) &identifierOffset, "^(0|[1-9]{1}[0-9]*)$"),
         PARAM_DB_TYPE(PARAM_DB_TYPE_ID, "--dbtype", "Database type", "Database type 0: auto, 1: amino acid 2: nucleotides", typeid(int), (void *) &dbType, "[0-2]{1}"),
-        PARAM_CREATEDB_MODE(PARAM_CREATEDB_MODE_ID, "--createdb-mode", "Createdb mode", "Createdb mode 0: copy data, 1: soft link data and write new index (works only with single line fasta/q)", typeid(int), (void *) &createdbMode, "^[0-1]{1}$"),
+        PARAM_CREATEDB_MODE(PARAM_CREATEDB_MODE_ID, "--createdb-mode", "Createdb mode", "Createdb mode 0: copy data, 1: soft link data and write new index (works only with single line fasta/q) 2: GPU compatible db", typeid(int), (void *) &createdbMode, "^[0-2]{1}$"),
         PARAM_SHUFFLE(PARAM_SHUFFLE_ID, "--shuffle", "Shuffle input database", "Shuffle input database", typeid(bool), (void *) &shuffleDatabase, ""),
         PARAM_WRITE_LOOKUP(PARAM_WRITE_LOOKUP_ID, "--write-lookup", "Write lookup file", "write .lookup file containing mapping from internal id, fasta id and file number", typeid(int), (void *) &writeLookup, "^[0-1]{1}", MMseqsParameter::COMMAND_EXPERT),
         PARAM_USE_HEADER_FILE(PARAM_USE_HEADER_FILE_ID, "--use-header-file", "Use header DB", "use the sequence header DB instead of the body to map the entry keys", typeid(bool), (void *) &useHeaderFile, ""),
@@ -287,6 +289,8 @@ Parameters::Parameters():
         // pairaln
         PARAM_PAIRING_DUMMY_MODE(PARAM_PAIRING_DUMMY_MODE_ID, "--pairing-dummy-mode", "Include dummy pairing", "0: dont include, 1: include - an entry that will cause result2msa to write a gap only line", typeid(int), (void *) &pairdummymode, "^[0-1]{1}$", MMseqsParameter::COMMAND_EXPERT),
         PARAM_PAIRING_MODE(PARAM_PAIRING_MODE_ID, "--pairing-mode", "Pairing mode", "0: pair maximal per species, 1: pair only if all chains are covered per species", typeid(int), (void *) &pairmode, "^[0-1]{1}$", MMseqsParameter::COMMAND_EXPERT),
+        PARAM_PAIRING_FILTER(PARAM_PAIRING_FILTER_ID, "--pairing-filter", "Pairing filter", "filter hits by 0: top hit, 1: pair by proximity of IDs", typeid(int), (void *) &pairfilter, "^[0-1]{1}$", MMseqsParameter::COMMAND_EXPERT),
+        PARAM_PAIRING_PROX_DIST(PARAM_PAIRING_PROX_DIST_ID, "--pairing-prox-dist", "Proximity distance threshold", "adjust the distance threshold for pairing (--pairing-filter 1)", typeid(int), (void *) &pairProximityDistance, "^[0-9]{1}[0-9]*$", MMseqsParameter::COMMAND_EXPERT),
         // taxonomyreport
         PARAM_REPORT_MODE(PARAM_REPORT_MODE_ID, "--report-mode", "Report mode", "Taxonomy report mode\n0: Kraken\n1: Krona\n2: do not create a report (for workflows only)\n3: Kraken per query database", typeid(int), (void *) &reportMode, "^[0-3]{1}$"),
         // createtaxdb
@@ -308,6 +312,26 @@ Parameters::Parameters():
         // unpackdb
         PARAM_UNPACK_SUFFIX(PARAM_UNPACK_SUFFIX_ID, "--unpack-suffix", "Unpack suffix", "File suffix for unpacked files.\nAdd .gz suffix to write compressed files.", typeid(std::string), (void *) &unpackSuffix, "^.*$"),
         PARAM_UNPACK_NAME_MODE(PARAM_UNPACK_NAME_MODE_ID, "--unpack-name-mode", "Unpack name mode", "Name unpacked files by 0: DB key, 1: accession (through .lookup)", typeid(int), (void *) &unpackNameMode, "^[0-1]{1}$"),
+        // fwbw
+        PARAM_MACT(PARAM_MACT_ID, "--mact", "MAC threshold", "Maximum accuracy threshold", typeid(float), (void *) &mact, "^0(\\.[0-9]+)?|^1(\\.0+)?$", MMseqsParameter::COMMAND_EXPERT),
+        PARAM_FWBW_GAPOPEN(PARAM_FWBW_GAPOPEN_ID, "--fwbw-gapopen", "fwbw-gapopen", "Gap open penalty for fwbw", typeid(float), (void *) &fwbwGapopen, "^([0-9]+(\\.[0-9]+)?)|(\\.[0-9]+)$", MMseqsParameter::COMMAND_EXPERT),
+        PARAM_FWBW_GAPEXTEND(PARAM_FWBW_GAPEXTEND_ID, "--fwbw-gapextend", "fwbw-gapextend", "Gap extension penalty for fwbw", typeid(float), (void *) &fwbwGapextend, "^([0-9]+(\\.[0-9]+)?)|(\\.[0-9]+)$", MMseqsParameter::COMMAND_EXPERT),
+        PARAM_TEMPERATURE(PARAM_TEMPERATURE_ID, "--temperature", "Temperature", "Temperature for forward-backward", typeid(float), (void *) &temperature, "^(0\\.[0-9]+|[1-9][0-9]*\\.?[0-9]*)$", MMseqsParameter::COMMAND_EXPERT),
+        PARAM_BLOCKLEN(PARAM_BLOCKLEN_ID, "--blocklen", "Block length", "Block length for forward-backward", typeid(int), (void *) &blocklen, "^[1-9]{1}[0-9]*$", MMseqsParameter::COMMAND_EXPERT),
+        PARAM_FWBW_BACKTRACE_MODE(PARAM_FWBW_BACKTRACE_MODE_ID, "--fwbw-backtrace-mode", "Backtrace mode", "Backtrace mode 0: no backtrace, 1: local", typeid(int), (void *) &fwbwBacktraceMode, "^[01]$", MMseqsParameter::COMMAND_EXPERT),
+        // touchdb
+        PARAM_TOUCH_LOCK(PARAM_TOUCH_LOCK_ID, "--touch-lock", "Touch lock", "Lock touched database or database entries into memory. Process will not exit until killed.", typeid(bool), (void *) &touchLock, "", MMseqsParameter::COMMAND_EXPERT),
+        // proteomecluster
+        PARAM_PPS_WEIGHT_FILE(PARAM_PPS_WEIGHT_FILE_ID, "--ppsWeights", "PPS Weight file name", "Weights used for proteome cluster priorization", typeid(std::string), (void*) &ppsWeightFile, "",MMseqsParameter::COMMAND_HIDDEN ),
+        PARAM_WEIGHT_CLUSTER_COUNT(PARAM_WEIGHT_CLUSTER_COUNT_ID, "--weight-clustercount", "Weight cluster count", "Weight of cluster count in clustering", typeid(float), (void *) &weightClusterCount, "^-?[0-9]*(\\.[0-9]+)?$", MMseqsParameter::COMMAND_HIDDEN),
+        PARAM_PROTEOME_SIMILARITY(PARAM_PROTEOME_SIMILARITY_ID, "--proteome-similarity", "Proteome similarity", "Proteome similarity threshold", typeid(float), (void *) &proteomeSimThr, "^0(\\.[0-9]+)?|1(\\.0+)?$", MMseqsParameter::COMMAND_EXPERT),
+        PARAM_PROTEOME_RELATIVE_SIMILARITY(PARAM_PROTEOME_RELATIVE_SIMILARITY_ID, "--proteome-relative-similarity", "Proteome relative similarity", "Proteome relative similarity threshold normalized by proteome size", typeid(float), (void *) &proteomeRelativeSimThr, "^0(\\.[0-9]+)?|1(\\.0+)?$", MMseqsParameter::COMMAND_CLUSTPROTEOME),
+        PARAM_PROTEOME_CASCADED_CLUSTERING(PARAM_PROTEOME_CASCADED_CLUSTERING_ID, "--proteome-cascaded-clustering", "Proteome cascaded clustering", "Cascaded clustering", typeid(bool), (void *) &proteomeCascadedClustering, "", MMseqsParameter::COMMAND_EXPERT),
+        PARAM_INCLUDE_ALIGN_FILES(PARAM_INCLUDE_ALIGN_FILES_ID, "--include-align-files", "Include align files in proteomecluster", "Include align files", typeid(bool), (void *) &includeAlignFiles, "", MMseqsParameter::COMMAND_HIDDEN),
+        PARAM_PROTEOME_WEIGHT_FILE(PARAM_PROTEOME_WEIGHT_FILE_ID, "--proteome-weights", "Proteome Weight file name", "Weights used for proteome priorization", typeid(std::string), (void*) &proteomeWeightFile, "",MMseqsParameter::COMMAND_EXPERT ),
+        PARAM_PROTEOME_WEIGHT_CLUSTER_COUNT(PARAM_PROTEOME_WEIGHT_CLUSTER_COUNT_ID, "--proteome-weight-clustercount", "Weight cluster count in proteome clustering", "Weight of cluster count in proteome clustering", typeid(float), (void *) &proteomeWeightClusterCount, "^-?[0-9]*(\\.[0-9]+)?$", MMseqsParameter::COMMAND_EXPERT),
+        PARAM_PROTEOME_INCLUDE_ALIGN_FILES(PARAM_PROTEOME_INCLUDE_ALIGN_FILES_ID, "--proteome-include-align-files", "Include align files in proteomecluster", "Include align files", typeid(bool), (void *) &proteomeIncludeAlignFiles, "", MMseqsParameter::COMMAND_EXPERT),
+        PARAM_PROTEOME_HIDDEN_REPORT(PARAM_PROTEOME_HIDDEN_REPORT_ID, "--proteome-hidden-report", "Hidden report", "Hidden proteome alignment result against the reference proteome", typeid(bool), (void *) &proteomeHiddenReport, "", MMseqsParameter::COMMAND_HIDDEN),
         // for modules that should handle -h themselves
         PARAM_HELP(PARAM_HELP_ID, "-h", "Help", "Help", typeid(bool), (void *) &help, "", MMseqsParameter::COMMAND_HIDDEN),
         PARAM_HELP_LONG(PARAM_HELP_LONG_ID, "--help", "Help", "Help", typeid(bool), (void *) &help, "", MMseqsParameter::COMMAND_HIDDEN)
@@ -488,6 +512,7 @@ Parameters::Parameters():
     clust.push_back(&PARAM_V);
     clust.push_back(&PARAM_WEIGHT_FILE);
     clust.push_back(&PARAM_WEIGHT_THR);
+    clust.push_back(&PARAM_CLUSTER_SET_MODE);
 
     // rescorediagonal
     rescorediagonal.push_back(&PARAM_SUB_MAT);
@@ -583,6 +608,7 @@ Parameters::Parameters():
     createtsv.push_back(&PARAM_FULL_HEADER);
     createtsv.push_back(&PARAM_IDX_SEQ_SRC);
     createtsv.push_back(&PARAM_DB_OUTPUT);
+    createtsv.push_back(&PARAM_PRELOAD_MODE);
     createtsv.push_back(&PARAM_THREADS);
     createtsv.push_back(&PARAM_COMPRESSED);
     createtsv.push_back(&PARAM_V);
@@ -837,7 +863,13 @@ Parameters::Parameters():
     createdb.push_back(&PARAM_CREATEDB_MODE);
     createdb.push_back(&PARAM_WRITE_LOOKUP);
     createdb.push_back(&PARAM_ID_OFFSET);
+    createdb.push_back(&PARAM_THREADS);
     createdb.push_back(&PARAM_COMPRESSED);
+    createdb.push_back(&PARAM_MASK_RESIDUES);
+    createdb.push_back(&PARAM_MASK_PROBABILTY);
+    createdb.push_back(&PARAM_MASK_LOWER_CASE);
+    createdb.push_back(&PARAM_MASK_N_REPEAT);
+    createdb.push_back(&PARAM_GPU);
     createdb.push_back(&PARAM_V);
 
     // makepaddedseqdb
@@ -1272,6 +1304,8 @@ Parameters::Parameters():
     pairaln.push_back(&PARAM_PRELOAD_MODE);
     pairaln.push_back(&PARAM_PAIRING_DUMMY_MODE);
     pairaln.push_back(&PARAM_PAIRING_MODE);
+    pairaln.push_back(&PARAM_PAIRING_FILTER);
+    pairaln.push_back(&PARAM_PAIRING_PROX_DIST);
     pairaln.push_back(&PARAM_COMPRESSED);
     pairaln.push_back(&PARAM_THREADS);
     pairaln.push_back(&PARAM_V);
@@ -1279,6 +1313,59 @@ Parameters::Parameters():
     sortresult.push_back(&PARAM_COMPRESSED);
     sortresult.push_back(&PARAM_THREADS);
     sortresult.push_back(&PARAM_V);
+
+    // fwbw
+    fwbw.push_back(&PARAM_SUB_MAT);
+    fwbw.push_back(&PARAM_MACT);
+    fwbw.push_back(&PARAM_FWBW_GAPOPEN);
+    fwbw.push_back(&PARAM_FWBW_GAPEXTEND);
+    fwbw.push_back(&PARAM_TEMPERATURE);
+    fwbw.push_back(&PARAM_BLOCKLEN);
+    fwbw.push_back(&PARAM_FWBW_BACKTRACE_MODE);
+    fwbw.push_back(&PARAM_E);
+    fwbw.push_back(&PARAM_MIN_SEQ_ID);
+    fwbw.push_back(&PARAM_MIN_ALN_LEN);
+    fwbw.push_back(&PARAM_SEQ_ID_MODE);
+    fwbw.push_back(&PARAM_C);
+    fwbw.push_back(&PARAM_COV_MODE);
+    fwbw.push_back(&PARAM_THREADS);
+    fwbw.push_back(&PARAM_COMPRESSED);
+    fwbw.push_back(&PARAM_V);
+
+    //proteomecluster
+    proteomecluster.push_back(&PARAM_SUB_MAT);
+    proteomecluster.push_back(&PARAM_ADD_BACKTRACE);
+    proteomecluster.push_back(&PARAM_ALIGNMENT_MODE);
+    proteomecluster.push_back(&PARAM_REALIGN_SCORE_BIAS); 
+    proteomecluster.push_back(&PARAM_E);
+    proteomecluster.push_back(&PARAM_MIN_SEQ_ID);
+    proteomecluster.push_back(&PARAM_MIN_ALN_LEN);
+    proteomecluster.push_back(&PARAM_SEQ_ID_MODE);
+    proteomecluster.push_back(&PARAM_C);
+    proteomecluster.push_back(&PARAM_COV_MODE);
+    proteomecluster.push_back(&PARAM_MAX_SEQ_LEN);
+    proteomecluster.push_back(&PARAM_NO_COMP_BIAS_CORR);
+    proteomecluster.push_back(&PARAM_NO_COMP_BIAS_CORR_SCALE);
+    proteomecluster.push_back(&PARAM_WEIGHT_CLUSTER_COUNT);
+    proteomecluster.push_back(&PARAM_PPS_WEIGHT_FILE);
+    proteomecluster.push_back(&PARAM_PROTEOME_WEIGHT_FILE);
+    proteomecluster.push_back(&PARAM_PROTEOME_WEIGHT_CLUSTER_COUNT);
+    proteomecluster.push_back(&PARAM_PROTEOME_INCLUDE_ALIGN_FILES);
+    proteomecluster.push_back(&PARAM_PROTEOME_HIDDEN_REPORT);
+    proteomecluster.push_back(&PARAM_PROTEOME_SIMILARITY);
+    proteomecluster.push_back(&PARAM_PROTEOME_RELATIVE_SIMILARITY);
+    proteomecluster.push_back(&PARAM_PROTEOME_CASCADED_CLUSTERING);
+    proteomecluster.push_back(&PARAM_INCLUDE_ALIGN_FILES);
+    proteomecluster.push_back(&PARAM_REALIGN);
+    proteomecluster.push_back(&PARAM_INCLUDE_IDENTITY);
+    proteomecluster.push_back(&PARAM_PRELOAD_MODE);
+    proteomecluster.push_back(&PARAM_SCORE_BIAS);
+    proteomecluster.push_back(&PARAM_GAP_OPEN);
+    proteomecluster.push_back(&PARAM_GAP_EXTEND);
+    proteomecluster.push_back(&PARAM_ZDROP);
+    proteomecluster.push_back(&PARAM_THREADS);
+    proteomecluster.push_back(&PARAM_COMPRESSED);
+    proteomecluster.push_back(&PARAM_V);
 
     // WORKFLOWS
     searchworkflow = combineList(align, prefilter);
@@ -1323,6 +1410,7 @@ Parameters::Parameters():
     easysearchworkflow = combineList(easysearchworkflow, makepaddedseqdb);
     easysearchworkflow.push_back(&PARAM_GREEDY_BEST_HITS);
 
+
     // createindex workflow
     createindex = combineList(indexdb, extractorfs);
     createindex = combineList(createindex, extractframes);
@@ -1363,6 +1451,10 @@ Parameters::Parameters():
 
     // easyclusterworkflow
     easyclusterworkflow = combineList(clusterworkflow, createdb);
+
+    // easyproteomeclusterworkflow
+    easyproteomeclusterworkflow = combineList(easyclusterworkflow, proteomecluster);
+    easyproteomeclusterworkflow.push_back(&PARAM_CLUSTER_MODULE);
 
     // taxonomy
     taxonomy.push_back(&PARAM_ORF_FILTER);
@@ -1453,6 +1545,8 @@ Parameters::Parameters():
     appenddbtoindex.push_back(&PARAM_V);
 
     // touchdb
+    touchdb.push_back(&PARAM_ID_LIST);
+    touchdb.push_back(&PARAM_TOUCH_LOCK);
     touchdb.push_back(&PARAM_THREADS);
     touchdb.push_back(&PARAM_V);
 
@@ -2397,6 +2491,7 @@ void Parameters::setDefaults() {
     realignScoreBias = -0.2f;
     realignMaxSeqs = INT_MAX;
     correlationScoreWeight = 0.0;
+    clusteringSetMode = 0;
 
     // affinity clustering
     maxIteration=1000;
@@ -2651,7 +2746,8 @@ void Parameters::setDefaults() {
     // pairaln
     pairdummymode = PAIRALN_DUMMY_MODE_OFF;
     pairmode = PAIRALN_MODE_ALL_PER_SPECIES;
-
+    pairfilter = PAIRALN_FILTER_TOP_HIT;
+    pairProximityDistance = 20;
     // taxonomyreport
     reportMode = 0;
 
@@ -2662,6 +2758,30 @@ void Parameters::setDefaults() {
     // taxonomy
     taxonomySearchMode = Parameters::TAXONOMY_APPROX_2BLCA;
     taxonomyOutputMode = Parameters::TAXONOMY_OUTPUT_LCA;
+    
+    // fwbw
+    mact = 0.035;
+    fwbwGapopen = 10;
+    fwbwGapextend = 2;
+    temperature = 1;
+    blocklen = 16;
+    fwbwBacktraceMode = 1;
+
+    // touchdb
+    touchLock = false;
+
+
+    // proteomecluster
+    ppsWeightFile = "";
+    proteomeWeightFile = "";
+    weightClusterCount = 0.0;
+    proteomeWeightClusterCount = 0.0;
+    proteomeSimThr = 0.9;
+    proteomeRelativeSimThr = 0.9;
+    proteomeCascadedClustering = 0;
+    includeAlignFiles = false;
+    proteomeIncludeAlignFiles = false;
+    proteomeHiddenReport = false;
 
     // help
     help = 0;
@@ -2683,7 +2803,7 @@ void Parameters::setDefaults() {
             { CITATION_PLASS,    "Steinegger M, Mirdita M, Soding J: Protein-level assembly increases protein sequence recovery from metagenomic samples manyfold. Nature Methods, 16(7), 603-606 (2019)" },
             { CITATION_SERVER,   "Mirdita M, Steinegger M, Soding J: MMseqs2 desktop and local web server app for fast, interactive sequence searches. Bioinformatics, 35(16), 2856-2858 (2019)" },
             { CITATION_TAXONOMY, "Mirdita M, Steinegger M, Breitwieser F, Soding J, Levy Karin E: Fast and sensitive taxonomic assignment to metagenomic contigs. Bioinformatics, btab184 (2021)" },
-            { CITATION_GPU,      "Kallenborn F, Chacon A, Hundt C, Sirelkhatim H, Didi K, Dallago C, Mirdita M, Schmidt B, Steinegger M: GPU-accelerated homology search with MMseqs2. bioRxiv, 2024.11.13.623350 (2024)" },
+            { CITATION_GPU,      "Kallenborn F, Chacon A, Hundt C, Sirelkhatim H, Didi K, Cha S, Dallago C, Mirdita M, Schmidt B, Steinegger M: GPU-accelerated homology search with MMseqs2. Nature Methods (2025)" },
     };
 }
 

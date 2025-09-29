@@ -3,6 +3,7 @@ set(util_source_files
         util/alignbykmer.cpp
         util/appenddbtoindex.cpp
         util/apply.cpp
+        util/calculatelambda.cpp
         util/clusthash.cpp
         util/compress.cpp
         util/convert2fasta.cpp
@@ -63,7 +64,6 @@ set(util_source_files
         util/setextendeddbtype.cpp
         util/sortresult.cpp
         util/splitdb.cpp
-        util/setextendeddbtype.cpp
         util/splitsequence.cpp
         util/subtractdbs.cpp
         util/summarizealis.cpp
@@ -79,6 +79,7 @@ set(util_source_files
         util/tar2db.cpp
         util/unpackdb.cpp
         util/proteinaln2nucl.cpp
+        util/proteomecluster.cpp
         util/versionstring.cpp
         util/diskspaceavail.cpp
         PARENT_SCOPE
