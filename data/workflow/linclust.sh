@@ -16,7 +16,7 @@ notExists() {
 
 INPUT="$1"
 TMP_PATH="$3"
-SOURCE="$INPUT"
+# SOURCE="$INPUT"
 
 # 1. Finding exact $k$-mer matches.
 if notExists "${TMP_PATH}/pref.dbtype"; then
@@ -24,69 +24,29 @@ if notExists "${TMP_PATH}/pref.dbtype"; then
     $RUNNER "$MMSEQS" kmermatcher "$INPUT" "${TMP_PATH}/pref" ${KMERMATCHER_PAR} \
         || fail "kmermatcher died"
 fi
-# 2. Hamming distance pre-clustering
-if notExists "${TMP_PATH}/pref_rescore1.dbtype"; then
-    # shellcheck disable=SC2086
-    $RUNNER "$MMSEQS" rescorediagonal "$INPUT" "$INPUT" "${TMP_PATH}/pref" "${TMP_PATH}/pref_rescore1" ${HAMMING_PAR} \
-        || fail "Rescore with hamming distance step died"
-fi
-if notExists "${TMP_PATH}/pre_clust.dbtype"; then
-    # shellcheck disable=SC2086
-    "$MMSEQS" clust "$INPUT" "${TMP_PATH}/pref_rescore1" "${TMP_PATH}/pre_clust" ${CLUSTER_PAR} \
-        || fail "Pre-clustering step died"
-fi
 
-awk '{ print $1 }' "${TMP_PATH}/pre_clust.index" > "${TMP_PATH}/order_redundancy"
-if notExists "${TMP_PATH}/input_step_redundancy.dbtype"; then
-    # shellcheck disable=SC2086
-    "$MMSEQS" createsubdb "${TMP_PATH}/order_redundancy" "$INPUT" "${TMP_PATH}/input_step_redundancy" ${VERBOSITY} --subdb-mode 1 \
-        || fail "Createsubdb step died"
-fi
 
-if notExists "${TMP_PATH}/pref_filter1.dbtype"; then
-    # shellcheck disable=SC2086
-    "$MMSEQS" createsubdb "${TMP_PATH}/order_redundancy" "${TMP_PATH}/pref" "${TMP_PATH}/pref_filter1" ${VERBOSITY} --subdb-mode 1 \
-        || fail "Createsubdb step died"
-fi
+# if notExists "${TMP_PATH}/aln_ungap.dbtype"; then
+#     # shellcheck disable=SC2086
+#     $RUNNER "$MMSEQS" rescorediagonal "$INPUT" "$INPUT" "${TMP_PATH}/pref" "${TMP_PATH}/aln_ungap" ${UNGAPPED_ALN_PAR} \
+#         || fail "Rescore with ungapped substitution step died"
+# fi
 
-if notExists "${TMP_PATH}/pref_filter2.dbtype"; then
-    # shellcheck disable=SC2086
-    "$MMSEQS" filterdb "${TMP_PATH}/pref_filter1" "${TMP_PATH}/pref_filter2" --filter-file "${TMP_PATH}/order_redundancy" ${VERBOSITYANDCOMPRESS} \
-        || fail "Filterdb step died"
-fi
-
-INPUT="${TMP_PATH}/input_step_redundancy"
-# 3. Ungapped alignment filtering
-RESULTDB="${TMP_PATH}/pref_filter2"
-if [ -n "$FILTER" ]; then
-    if notExists "${TMP_PATH}/pref_rescore2.dbtype"; then
-        # shellcheck disable=SC2086
-        $RUNNER "$MMSEQS" rescorediagonal "$INPUT" "$INPUT" "$RESULTDB" "${TMP_PATH}/pref_rescore2" ${UNGAPPED_ALN_PAR} \
-            || fail "Ungapped alignment step died"
-    fi
-    RESULTDB="${TMP_PATH}/pref_rescore2"
-fi
-
-# 4. Local gapped sequence alignment.
-
-if notExists "${TMP_PATH}/aln.dbtype"; then
-    # shellcheck disable=SC2086
-    $RUNNER "$MMSEQS" "${ALIGN_MODULE}" "$INPUT" "$INPUT" "$RESULTDB" "${TMP_PATH}/aln" ${ALIGNMENT_PAR} \
-        || fail "Alignment step died"
-fi
-RESULTDB="${TMP_PATH}/aln"
+# RESULTDB="${TMP_PATH}/aln_ungap"
+RESULTDB="${TMP_PATH}/pref"
 
 # 5. Clustering using greedy set cover.
 if notExists "${TMP_PATH}/clust.dbtype"; then
     # shellcheck disable=SC2086
-    "$MMSEQS" clust "$INPUT" "$RESULTDB" "${TMP_PATH}/clust" ${CLUSTER_PAR} \
+    "$MMSEQS" align2clust "$INPUT" "$INPUT" "$RESULTDB" "$2" ${ALIGN2CLUST_PAR} \
         || fail "Clustering step died"
 fi
-if notExists "${TMP_PATH}/clu.dbtype"; then
-    # shellcheck disable=SC2086
-    "$MMSEQS" mergeclusters "$SOURCE" "$2" "${TMP_PATH}/pre_clust" "${TMP_PATH}/clust" $MERGECLU_PAR \
-        || fail "mergeclusters died"
-fi
+
+# if notExists "${TMP_PATH}/cluster.tsv"; then
+#     # shellcheck disable=SC2086
+#     "$MMSEQS" createtsv "$INPUT" "$INPUT" "${TMP_PATH}/clust" "cluster.tsv" ${THREADS_PAR} \
+#         || fail "Convert Alignments died"
+# fi
 
 if [ -n "$REMOVE_TMP" ]; then
     # shellcheck disable=SC2086

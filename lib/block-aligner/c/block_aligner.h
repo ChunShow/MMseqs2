@@ -201,10 +201,10 @@ struct AAProfile *block_new_aaprofile(uintptr_t str_len, uintptr_t block_size, i
 uintptr_t block_len_aaprofile(const struct AAProfile *profile);
 
 /**
- * Clear the profile so it can be used for profile lengths less than or equal
+ * Clear the profile so it can be reused for profile lengths less than or equal
  * to the length this struct was created with.
  */
-void block_clear_aaprofile(struct AAProfile *profile, uintptr_t str_len);
+void block_clear_aaprofile(struct AAProfile *profile, uintptr_t str_len, uintptr_t block_size);
 
 /**
  * Set the score for a position and byte.
@@ -348,6 +348,21 @@ void block_set_bytes_padded_aa_numsequence(struct PaddedBytes *padded,
                                const uint8_t *s,
                                uintptr_t len,
                                uintptr_t max_size);
+
+/**
+ * Write to a padded amino acid string, in reverse.
+ */
+void block_set_bytes_rev_padded_aa(struct PaddedBytes *padded,
+                                const uint8_t *s,
+                                uintptr_t len,
+                                uintptr_t max_size);
+
+void block_set_bytes_rev_padded_aa_numsequence(struct PaddedBytes *padded,
+                                const uint8_t *s,
+                                uintptr_t len,
+                                uintptr_t max_size);
+
+
 /**
  * Frees a padded amino acid string.
  */
@@ -367,6 +382,12 @@ void block_set_pos_bias(struct PosBias *bias, const int16_t *b, uintptr_t len);
  * Frees the positional score bias vector.
  */
 void block_free_pos_bias(struct PosBias *bias);
+
+/**
+ * Write to the positional score bias vector.
+ */
+ void block_set_rev_pos_bias(struct PosBias *bias, const int16_t *b, uintptr_t len);
+
 
 /**
  *Create a new block aligner instance for global alignment of amino acid strings (no traceback).
@@ -461,6 +482,19 @@ void block_align_profile_aa_xdrop(BlockHandle b,
                                   const struct AAProfile *r,
                                   struct SizeRange s,
                                   int32_t x);
+
+/**
+ *X-drop alignment of two amino acid strings with posbias (no traceback).
+ */
+ void block_align_aa_xdrop_posbias(BlockHandle b,
+                                    const struct PaddedBytes *q,
+                                    const struct PosBias *q_bias,
+                                    const struct PaddedBytes *r,
+                                    const struct PosBias *r_bias,
+                                    const struct AAMatrix *m,
+                                    struct Gaps g,
+                                    struct SizeRange s,
+                                    int32_t x);
 
 /**
  *X-drop alignment of two amino acid strings with 3di (no traceback).

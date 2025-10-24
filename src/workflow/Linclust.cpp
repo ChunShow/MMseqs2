@@ -109,6 +109,8 @@ int linclust(int argc, const char **argv, const Command& command) {
     // also coverage should not be under 0.5
     float prevCov = par.covThr;
     par.covThr = std::max(0.5f, par.covThr);
+    //temporary
+    par.filterHits = true;
     cmd.addVariable("HAMMING_PAR", par.createParameterString(par.rescorediagonal).c_str());
     // set it back to old value
     par.covThr = prevCov;
@@ -116,8 +118,10 @@ int linclust(int argc, const char **argv, const Command& command) {
     par.rescoreMode = Parameters::RESCORE_MODE_SUBSTITUTION;
 
     // # 3. Ungapped alignment filtering
-    par.filterHits = true;
+    par.filterHits = true; // gyuri changed
     cmd.addVariable("UNGAPPED_ALN_PAR", par.createParameterString(par.rescorediagonal).c_str());
+    par.filterHits = false;
+    cmd.addVariable("ALIGN2CLUST_PAR", par.createParameterString(par.align2clust).c_str());
 
     // # 4. Local gapped sequence alignment.
     if (isUngappedMode) {

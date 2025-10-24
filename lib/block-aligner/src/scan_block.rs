@@ -2179,6 +2179,25 @@ impl PaddedBytes {
         self.len = b.len();
     }
 
+    /// Modifies the bytes in place in reverse, filling in the rest of the memory with padding bytes.
+    pub fn set_bytes_rev<M: Matrix>(&mut self, b: &[u8], block_size: usize) {
+        self.s[0] = M::convert_char(M::NULL);
+        self.s[1..1 + b.len()].copy_from_slice(b);
+        self.s[1..1 + b.len()].reverse();
+        self.s[1..1 + b.len()].iter_mut().for_each(|c| *c = M::convert_char(*c));
+        self.s[1 + b.len()..1 + b.len() + block_size].fill(M::convert_char(M::NULL));
+        self.len = b.len();
+    }
+    
+    pub fn set_bytes_rev_num<M: Matrix>(&mut self, b: &[u8], block_size: usize) {
+        self.s[0] = M::convert_char(M::NULL);
+        self.s[1..1 + b.len()].copy_from_slice(b);
+        self.s[1..1 + b.len()].reverse();
+        // self.s[1..1 + b.len()].iter_mut().for_each(|c| *c = M::convert_char(*c));
+        self.s[1 + b.len()..1 + b.len() + block_size].fill(M::convert_char(M::NULL));
+        self.len = b.len();
+    }
+
     /// Create from a byte slice.
     ///
     /// Make sure that `block_size` is greater than or equal to the upper bound

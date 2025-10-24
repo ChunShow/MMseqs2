@@ -724,6 +724,13 @@ impl PosBias {
         self.len = b.len();
     }
 
+    pub fn set_biases_rev(&mut self, b: &[i16]) {
+        self.bias.fill(0i16);
+        self.bias[1..b.len() + 1].copy_from_slice(b);
+        self.bias[1..b.len() + 1].reverse();
+        self.len = b.len();
+    }
+    
     #[inline]
     pub unsafe fn get(&self, i: usize) -> i16 {
         *self.bias.as_ptr().add(i)

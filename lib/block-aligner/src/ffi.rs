@@ -273,6 +273,23 @@ pub unsafe extern fn block_set_bytes_padded_aa_numsequence(padded: *mut PaddedBy
     padded_bytes.set_bytes_num::<AAMatrix>(bytes, max_size);
 }
 
+/// Write to a padded amino acid string, in reverse.
+#[no_mangle]
+pub unsafe extern fn block_set_bytes_rev_padded_aa(padded: *mut PaddedBytes, s: *const u8, len: usize, max_size: usize) {
+    let bytes = std::slice::from_raw_parts(s, len);
+    let padded_bytes = &mut *padded;
+    padded_bytes.set_bytes_rev::<AAMatrix>(bytes, max_size);
+}
+
+/// Write to a padded amino acid string, in reverse.
+#[no_mangle]
+pub unsafe extern fn block_set_bytes_rev_padded_aa_numsequence(padded: *mut PaddedBytes, s: *const u8, len: usize, max_size: usize) {
+    let bytes = std::slice::from_raw_parts(s, len);
+    let padded_bytes = &mut *padded;
+    padded_bytes.set_bytes_rev_num::<AAMatrix>(bytes, max_size);
+}
+
+
 /// Frees a padded amino acid string.
 #[no_mangle]
 pub unsafe extern fn block_free_padded_aa(padded: *mut PaddedBytes) {
@@ -295,6 +312,14 @@ pub unsafe extern fn block_set_pos_bias(bias: *mut PosBias, b: *const i16, len: 
     let biases = std::slice::from_raw_parts(b, len);
     let pos_bias = &mut *bias;
     pos_bias.set_biases(biases);
+}
+
+/// Write to the positional score bias vector, in reverse.
+#[no_mangle]
+pub unsafe extern fn block_set_rev_pos_bias(bias: *mut PosBias, b: *const i16, len: usize) {
+    let biases = std::slice::from_raw_parts(b, len);
+    let pos_bias = &mut *bias;
+    pos_bias.set_biases_rev(biases);
 }
 
 /// Frees the positional score bias vector.

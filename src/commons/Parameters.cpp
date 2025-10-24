@@ -431,6 +431,25 @@ Parameters::Parameters():
     align.push_back(&PARAM_COMPRESSED);
     align.push_back(&PARAM_V);
 
+    // align2clust
+    align2clust.push_back(&PARAM_SUB_MAT);
+    align2clust.push_back(&PARAM_RESCORE_MODE);
+    align2clust.push_back(&PARAM_WRAPPED_SCORING);
+    align2clust.push_back(&PARAM_FILTER_HITS);
+    align2clust.push_back(&PARAM_E);
+    align2clust.push_back(&PARAM_C);
+    align2clust.push_back(&PARAM_ADD_BACKTRACE);
+    align2clust.push_back(&PARAM_COV_MODE);
+    align2clust.push_back(&PARAM_MIN_SEQ_ID);
+    align2clust.push_back(&PARAM_MIN_ALN_LEN);
+    align2clust.push_back(&PARAM_SEQ_ID_MODE);
+    align2clust.push_back(&PARAM_INCLUDE_IDENTITY);
+    align2clust.push_back(&PARAM_SORT_RESULTS);
+    align2clust.push_back(&PARAM_PRELOAD_MODE);
+    align2clust.push_back(&PARAM_THREADS);
+    align2clust.push_back(&PARAM_COMPRESSED);
+    align2clust.push_back(&PARAM_V);
+
     // prefilter
     prefilter.push_back(&PARAM_SUB_MAT);
     prefilter.push_back(&PARAM_SEED_SUB_MAT);
@@ -2690,7 +2709,7 @@ void Parameters::setDefaults() {
     weightFile = "";
     includeCountTable = true;
     countTableScale = 0.1;
-    useCountTable = false;
+    useCountTable = true;
     includeAdjacentSeq = true;
     extraMemoryScale = 0.01;
 

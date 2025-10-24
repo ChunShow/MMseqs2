@@ -1172,6 +1172,7 @@ public:
 
     std::vector<MMseqsParameter*> alignall;
     std::vector<MMseqsParameter*> align;
+    std::vector<MMseqsParameter*> align2clust;
     std::vector<MMseqsParameter*> rescorediagonal;
     std::vector<MMseqsParameter*> alignbykmer;
     std::vector<MMseqsParameter*> createFasta;
