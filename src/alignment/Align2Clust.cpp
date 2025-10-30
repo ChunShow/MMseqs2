@@ -153,24 +153,23 @@ const size_t dbFrom, const size_t dbSize) {
     targetSeq.resize(par.threads);
     matcher.resize(par.threads);
 
-    #pragma omp parallel
+#pragma omp parallel
     {
         unsigned int thread_idx = 0;
 #ifdef OPENMP
         thread_idx = static_cast<unsigned int>(omp_get_thread_num());
+#endif
         blockAligner[thread_idx] = new BlockAligner(par.maxSeqLen, MIN_SIZE, MAX_SIZE, -gapOpen, -gapExtend, par.compBiasCorrection, par.compBiasCorrectionScale, par, Parameters::DBTYPE_AMINO_ACIDS);
         targetSeq[thread_idx] = new Sequence(par.maxSeqLen, Parameters::DBTYPE_AMINO_ACIDS, subMat, 0, false, par.compBiasCorrection);
         matcher[thread_idx] = new Matcher(Parameters::DBTYPE_AMINO_ACIDS, par.maxSeqLen, subMat, &evaluer, par.compBiasCorrection, par.compBiasCorrectionScale, par.gapOpen.values.aminoacid(), par.gapExtend.values.aminoacid(), 0.0, par.zdrop);
-#endif
-    }
 
+    }
 
     // setup query
     Sequence querySeq(par.maxSeqLen, Parameters::DBTYPE_AMINO_ACIDS, subMat, 0, false, par.compBiasCorrection);
 
     const size_t flushSize = 1000000;
     Debug::Progress progress(dbSize);
-    size_t iterations = static_cast<int>(ceil(static_cast<double>(dbSize)/static_cast<double>(flushSize)));
 
     std::vector<std::pair<unsigned int, unsigned short>> dbKeysNdiagonal;
     std::vector<unsigned int> assignedMemKeys;
@@ -178,48 +177,44 @@ const size_t dbFrom, const size_t dbSize) {
         const unsigned int queryKey = seqDbr->getDbKey(i);
         const size_t alnId = alnDbr.getId(queryKey);
         char *data = alnDbr.getData(alnId, 0);
-        // only load query data if data != \0
-        size_t representative;
-        // if (*data != '\0') {
-            size_t queryId = seqDbr->getId(queryKey);
-            if (assignedcluster[queryId] != UINT_MAX) {
-                continue;
-            }
-            representative = queryId;
-            char*  querySequence = seqDbr->getData(queryId, 0);
-            size_t queryLen = seqDbr->getSeqLen(queryId);
-            querySeq.mapSequence(queryId, queryKey, querySequence, queryLen);
-        // }
-
         dbKeysNdiagonal.clear();
         assignedMemKeys.clear();
+        // only load query data if data != \0
+        size_t representative = seqDbr->getId(queryKey);
+        size_t queryId = representative;
+        if (assignedcluster[queryId] != UINT_MAX) {
+            continue;
+        }
+        char*  querySequence = seqDbr->getData(queryId, 0);
+        size_t queryLen = seqDbr->getSeqLen(queryId);
+        querySeq.mapSequence(queryId, queryKey, querySequence, queryLen);
+        
         while (*data != '\0') {
-            // char dbKeyBuffer[256];
-            // Util::parseKey(data, dbKeyBuffer);
-            // const unsigned int dbKey = static_cast<unsigned int>(strtoul(dbKeyBuffer, NULL, 10));
-            // dbKeys.push_back(dbKey);
             hit_t result = QueryMatcher::parsePrefilterHit(data);
-            if (assignedcluster[seqDbr->getId(result.seqId)] != UINT_MAX) {
+            const size_t targetId = seqDbr->getId(result.seqId);
+            if (assignedcluster[targetId] != UINT_MAX) {
                 data = Util::skipLine(data);
                 continue;
             }
             dbKeysNdiagonal.push_back(std::make_pair(result.seqId, result.diagonal));
             data = Util::skipLine(data);
         }
+
         if (dbKeysNdiagonal.size() == 1){
             //singleton
             assignedcluster[representative] = representative;
             continue;
         }
 
+        // set Query To align with members
 #pragma omp parallel
         {
             unsigned int thread_idx = 0;
 #ifdef OPENMP
             thread_idx = static_cast<unsigned int>(omp_get_thread_num());
+#endif
             blockAligner[thread_idx]->initQuery(querySequence, querySeq.numSequence, querySeq.L, Parameters::DBTYPE_AMINO_ACIDS);
             matcher[thread_idx]->initQuery(&querySeq);
-#endif
         }
 
 #pragma omp parallel
@@ -312,7 +307,7 @@ const size_t dbFrom, const size_t dbSize) {
                     
                     if(foundMatch) {
                         //temporary
-                        s_align alignment = blockAligner[thread_idx]->align(targetSequence, targetNumSequence, targetLen, new_qStartPos, new_tStartPos, backtrace, &evaluer, x_drop);
+                        s_align alignment = blockAligner[thread_idx]->align(targetSequence, targetNumSequence, targetLen, new_qStartPos, new_tStartPos, backtrace, &evaluer, x_drop, par);
                         unsigned int alnLength = backtrace.size(); // Is it correct?
                         double seqId = Util::computeSeqId(par.seqIdMode, alignment.identicalAACnt, querySeq.L, targetLen, alnLength);
                         Matcher::result_t res = Matcher::result_t(targetKey, alignment.score1, alignment.qCov, alignment.tCov, seqId, alignment.evalue, alnLen,
@@ -330,65 +325,65 @@ const size_t dbFrom, const size_t dbSize) {
             } 
         }
         // Expand cluster
-        std::set<unsigned int> newlyAssignedMemIds;
-        #pragma omp parallel
+        std::set<unsigned int> newlyAssignedMemKeys;
+#pragma omp parallel
         {
             unsigned int thread_idx = 0;
 #ifdef OPENMP
             thread_idx = (unsigned int) omp_get_thread_num();
 #endif
-            std::vector<unsigned int> localAssignedMemIds;
+            std::set<unsigned int> localSet; // 각 스레드 전용
 
             #pragma omp for schedule(dynamic, 1)
             for (size_t id = 0; id < dbKeysNdiagonal.size(); id++) {
-                if (dbKeysNdiagonal[id].second != USHRT_MAX) continue; // not clustered
+                if (dbKeysNdiagonal[id].second != USHRT_MAX) continue;
                 const unsigned int assignedMemKey = dbKeysNdiagonal[id].first;
                 const size_t alnId = alnDbr.getId(assignedMemKey);
-                char* dataExpand = alnDbr.getData(alnId, thread_idx);
+                char* dataExpand = alnDbr.getData(alnId, omp_get_thread_num());
 
                 while (*dataExpand != '\0') {
                     hit_t result = QueryMatcher::parsePrefilterHit(dataExpand);
-                    
-                    // if it's already assigned, skip
-                    if (assignedcluster[seqDbr->getId(result.seqId)] != UINT_MAX) {
-                        dataExpand = Util::skipLine(dataExpand);
-                        continue;
-                    }
-                    const unsigned int targetKey = result.seqId;
-                    const size_t targetId = seqDbr->getId(targetKey);
-
-                    // if query and target are identical
-                    const bool isIdentity = (queryKey == targetKey && par.includeIdentity) ? true : false;
-                    if (isIdentity) {
-                        continue;
-                    }
-                    char* targetSequence = seqDbr->getData(targetId, thread_idx);
-                    size_t targetLen = seqDbr->getSeqLen(targetId);
-                    targetSeq[thread_idx]->mapSequence(targetId, targetKey, targetSequence, targetLen);
-
-                    // run Alignment
-                    Matcher::result_t resultSW = matcher[thread_idx]->getSWResult(targetSeq[thread_idx], INT_MAX, false, par.covMode, par.covThr, par.evalThr, swMode, par.seqIdMode, 0);
-                    if (Alignment::checkCriteria(resultSW, 0, par.evalThr, par.seqIdThr, par.alnLenThr, par.covMode, par.covThr)) {
-                        localAssignedMemIds.push_back(targetId);
+                    const size_t targetId = seqDbr->getId(result.seqId);
+                    if (assignedcluster[targetId] == UINT_MAX) {
+                        localSet.insert(result.seqId);
                     }
                     dataExpand = Util::skipLine(dataExpand);
                 }
-
             }
 
-            // merge local assigned mem ids to global set
+            // 스레드별 localSet을 병합
             #pragma omp critical
             {
-                for (auto& id : localAssignedMemIds) {
-                    newlyAssignedMemIds.insert(id);
-                }
+                newlyAssignedMemKeys.insert(localSet.begin(), localSet.end());
             }
+        }
 
-            // assign representative to newly assigned members
-            for (auto& id : newlyAssignedMemIds) {
-                if(assignedcluster[id] == UINT_MAX){
-                    assignedcluster[id] = representative;
+        //for
+        std::vector<unsigned int> newlyAssignedMemKeysVec(newlyAssignedMemKeys.begin(), newlyAssignedMemKeys.end());
+#pragma omp parallel
+        {
+            unsigned int thread_idx = 0;
+#ifdef OPENMP
+            thread_idx = (unsigned int) omp_get_thread_num();
+#endif
+            #pragma omp for schedule(dynamic, 1)
+            for (size_t id = 0; id < newlyAssignedMemKeysVec.size(); id++) {
+                const unsigned int targetKey = newlyAssignedMemKeysVec[id];
+                const size_t targetId = seqDbr->getId(targetKey);
+                char* targetSequence = seqDbr->getData(targetId, thread_idx);
+                size_t targetLen = seqDbr->getSeqLen(targetId);
+                targetSeq[thread_idx]->mapSequence(targetId, targetKey, targetSequence, targetLen);
+
+                Matcher::result_t resultSW = matcher[thread_idx]->getSWResult(targetSeq[thread_idx], INT_MAX, false, par.covMode, par.covThr, par.evalThr, swMode, par.seqIdMode, 0);
+                if (Alignment::checkCriteria(resultSW, 0, par.evalThr, par.seqIdThr, par.alnLenThr, par.covMode, par.covThr)) {
+                    if(assignedcluster[targetId] == UINT_MAX){
+                        assignedcluster[targetId] = representative;
+                    } else{
+                        std::cout << "ERROR: already assigned: " << targetId << "\n";
+                        EXIT(EXIT_FAILURE);
+                    }
                 }
+                
             }
         }
     }
