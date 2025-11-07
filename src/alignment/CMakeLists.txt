@@ -26,7 +26,7 @@ set(alignment_source_files
         alignment/BandedNucleotideAligner.cpp
         alignment/rescorediagonal.cpp
         alignment/BlockAligner.cpp
-        alignment/Align2Clust.cpp
+        alignment/AlignBlock.cpp
         alignment/Fwbw.cpp
         PARENT_SCOPE
         )

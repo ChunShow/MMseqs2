@@ -121,7 +121,7 @@ int linclust(int argc, const char **argv, const Command& command) {
     par.filterHits = true; // gyuri changed
     cmd.addVariable("UNGAPPED_ALN_PAR", par.createParameterString(par.rescorediagonal).c_str());
     par.filterHits = false;
-    cmd.addVariable("ALIGN2CLUST_PAR", par.createParameterString(par.align2clust).c_str());
+    cmd.addVariable("ALIGNBLOCK_PAR", par.createParameterString(par.alignblock).c_str());
 
     // # 4. Local gapped sequence alignment.
     if (isUngappedMode) {
@@ -132,6 +132,7 @@ int linclust(int argc, const char **argv, const Command& command) {
     } else {
         cmd.addVariable("ALIGNMENT_PAR", par.createParameterString(par.align).c_str());
     }
+    cmd.addVariable("ALIGNBLOCK_PAR", par.createParameterString(par.alignblock).c_str());
     // # 5. Clustering using greedy set cover.
     cmd.addVariable("CLUSTER_PAR", par.createParameterString(par.clust).c_str());
     cmd.addVariable("MERGECLU_PAR", par.createParameterString(par.threadsandcompression).c_str());
