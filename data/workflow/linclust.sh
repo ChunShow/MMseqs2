@@ -25,12 +25,18 @@ if notExists "${TMP_PATH}/pref.dbtype"; then
         || fail "kmermatcher died"
 fi
 
+# if notExists "${TMP_PATH}/aln_ungap.dbtype"; then
+#     # shellcheck disable=SC2086
+#     $RUNNER "$MMSEQS" rescorediagonal "$INPUT" "$INPUT" "${TMP_PATH}/pref" "${TMP_PATH}/aln_ungap" ${UNGAPPED_ALN_PAR} \
+#         || fail "Rescore with ungapped substitution step died"
+# fi
+# RESULTDB="${TMP_PATH}/aln_ungap"
 RESULTDB="${TMP_PATH}/pref"
 
 # 5. Clustering using greedy set cover.
 if notExists "${TMP_PATH}/clust.dbtype"; then
     # shellcheck disable=SC2086
-    $RUNNER "$MMSEQS" alignblock "$INPUT" "$INPUT" "${TMP_PATH}/pref" "${TMP_PATH}/aln" ${ALIGNBLOCK_PAR} \
+    $RUNNER "$MMSEQS" alignblock "$INPUT" "$INPUT" "$RESULTDB" "${TMP_PATH}/aln" ${ALIGNBLOCK_PAR} \
         || fail "AlignBlock step died"
 fi
 

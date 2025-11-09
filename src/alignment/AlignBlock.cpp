@@ -8,7 +8,7 @@
 #include "QueryMatcher.h"
 // #include "CovSeqidQscPercMinDiag.lib.h"
 // #include "CovSeqidQscPercMinDiagTargetCov.lib.h"
-#include "QueryMatcher.h"
+#include "EvalueComputation.h"
 #include "IndexReader.h"
 #include "FastSort.h"
 #include "BlockAligner.h"
@@ -20,7 +20,7 @@
 #endif
 
 
-#define MAX_SIZE 256
+#define MAX_SIZE 4096
 #define MIN_SIZE 32
 
 static float parsePrecisionLib(const std::string &scoreFile, double targetSeqid, double targetCov, double targetPrecision) {
@@ -148,12 +148,13 @@ int doalignblock(Parameters &par,
 #ifdef OPENMP
             thread_idx = (unsigned int) omp_get_thread_num();
 #endif
+            // Matcher matcher(Parameters::DBTYPE_AMINO_ACIDS, par.maxSeqLen, subMat, &evaluer, par.compBiasCorrection, par.compBiasCorrectionScale, par.gapOpen.values.aminoacid(), par.gapExtend.values.aminoacid(), 0.0, par.zdrop);
             char buffer[1024 + 32768*4];
             std::string resultBuffer;
-            // Matcher matcher(Parameters::DBTYPE_AMINO_ACIDS, par.maxSeqLen, subMat, &evaluer, par.compBiasCorrection, par.compBiasCorrectionScale, par.gapOpen.values.aminoacid(), par.gapExtend.values.aminoacid(), 0.0, par.zdrop);
+            resultBuffer.reserve(1000000);
             Sequence query(par.maxSeqLen, Parameters::DBTYPE_AMINO_ACIDS, subMat, 0, false, par.compBiasCorrection);
             Sequence target(par.maxSeqLen, Parameters::DBTYPE_AMINO_ACIDS, subMat, 0, false, par.compBiasCorrection);
-            BlockAligner blockaligner(Parameters::DBTYPE_AMINO_ACIDS, par.maxSeqLen, subMat, &evaluer, par.compBiasCorrection, par.compBiasCorrectionScale, -par.gapOpen.values.aminoacid(), -par.gapExtend.values.aminoacid());
+            BlockAligner blockaligner(Parameters::DBTYPE_AMINO_ACIDS, par.maxSeqLen, subMat, &fastMatrix, &evaluer, par.compBiasCorrection, par.compBiasCorrectionScale, -par.gapOpen.values.aminoacid(), -par.gapExtend.values.aminoacid());
             
             std::vector<Matcher::result_t> alnResults;
             alnResults.reserve(300);
@@ -176,6 +177,7 @@ int doalignblock(Parameters &par,
                 for (size_t element = 0; element < prefRes.size(); element++) {
                     const unsigned int targetKey = tdbr->getDbKey(prefRes[element].seqId);
                     const unsigned int targetId = tdbr->getId(targetKey);
+                    const bool isIdentity = (queryKey == targetKey && (par.includeIdentity || sameQTDB)) ? true : false;
                     const char* targetSeq = tdbr->getData(targetId, thread_idx);
                     size_t targetLen = tdbr->getSeqLen(targetId);
                     target.mapSequence(targetId, targetKey, targetSeq, targetLen);
@@ -196,11 +198,23 @@ int doalignblock(Parameters &par,
                         }
                         seqId = Util::computeSeqId(par.seqIdMode, idCnt, query.L, target.L, ungapped_aln.alnLen);
                     }
+                    char *end = Itoa::i32toa_sse2(ungapped_aln.alnLen, buffer);
+                    size_t len = end - buffer;
+                    std::string backtrace = "";
+                    if (par.addBacktrace) {
+                        backtrace=std::string(buffer, len - 1);
+                        backtrace.push_back('M');
+                    }
+                    if (isIdentity) {
+                        // set coverage and seqid of identity
+                        ungapped_aln.qcov = 1.0f;
+                        ungapped_aln.tcov = 1.0f;
+                        seqId = 1.0f;
+                    }
                     bool hasSeqId = seqId >= (par.seqIdThr - std::numeric_limits<float>::epsilon());
                     
-                    Matcher::result_t result;
-                    std::string backtrace = "";
-                    if (hasAlnLen && hasCov && hasSeqId && hasEvalue) {
+                    if (isIdentity || hasAlnLen && hasCov && hasSeqId && hasEvalue) {
+                        Matcher::result_t result;
                         result = Matcher::result_t(targetKey, ungapped_aln.bitScore, ungapped_aln.qcov, ungapped_aln.tcov, seqId, ungapped_aln.eval, ungapped_aln.alnLen,
                                                        ungapped_aln.qStart, ungapped_aln.qEnd, query.L, ungapped_aln.tStart, ungapped_aln.tEnd, target.L, backtrace);
                         alnResults.emplace_back(result);
@@ -227,41 +241,52 @@ int doalignblock(Parameters &par,
 
                     bool foundMatch = false;
 
-                    for (int offset = 0; offset < alnLen; ++offset) {
-                        // mid - offset (left)
-                        int j_left = mid - offset;
-                        if (j_left >= 0) {
-                            int qpos = qStartPos + j_left;
-                            int dbpos = tStartPos + j_left;
-                            if (querySeq[qpos] == targetSeq[dbpos]) {
-                                new_qStartPos = qpos;
-                                new_tStartPos = dbpos;
-                                foundMatch = true;
-                                break;
-                            }
-                        }
+                    // for (int offset = 0; offset < alnLen; ++offset) {
+                    //     // mid - offset (left)
+                    //     int j_left = mid - offset;
+                    //     if (j_left >= 0) {
+                    //         int qpos = qStartPos + j_left;
+                    //         int dbpos = tStartPos + j_left;
+                    //         if (querySeq[qpos] == targetSeq[dbpos]) {
+                    //             new_qStartPos = qpos;
+                    //             new_tStartPos = dbpos;
+                    //             foundMatch = true;
+                    //             break;
+                    //         }
+                    //     }
 
-                        // mid + offset (right)
-                        int j_right = mid + offset;
-                        if (j_right < alnLen) {
-                            int qpos = qStartPos + j_right;
-                            int dbpos = tStartPos + j_right;
-                            if (querySeq[qpos] == targetSeq[dbpos]) {
-                                new_qStartPos = qpos;
-                                new_tStartPos = dbpos;
-                                foundMatch = true;
-                                break;
-                            }
+                    //     // mid + offset (right)
+                    //     int j_right = mid + offset;
+                    //     if (j_right < alnLen) {
+                    //         int qpos = qStartPos + j_right;
+                    //         int dbpos = tStartPos + j_right;
+                    //         if (querySeq[qpos] == targetSeq[dbpos]) {
+                    //             new_qStartPos = qpos;
+                    //             new_tStartPos = dbpos;
+                    //             foundMatch = true;
+                    //             break;
+                    //         }
+                    //     }
+                    // }
+                    for (int j=0; j < alnLen; ++j){
+                        int qpos = qStartPos + j;
+                        int dbpos = tStartPos + j;
+                        if (querySeq[qpos] == targetSeq[dbpos]) {
+                            new_qStartPos = qpos;
+                            new_tStartPos = dbpos;
+                            foundMatch = true;
+                            break;
                         }
                     }
-                
+                    
                     if(foundMatch) {
+                        std::string backtrace;
                         s_align alignment = blockaligner.align(&target, new_qStartPos, new_tStartPos, backtrace, x_drop);
                         unsigned int alnLength = backtrace.size(); // Is it correct?
                         double seqId = Util::computeSeqId(par.seqIdMode, alignment.identicalAACnt, query.L, targetLen, alnLength);
                         Matcher::result_t res = Matcher::result_t(targetKey, alignment.score1, alignment.qCov, alignment.tCov, seqId, alignment.evalue, alnLen,
                                                     alignment.qStartPos1, alignment.qEndPos1, query.L, alignment.dbStartPos1, alignment.dbEndPos1, targetLen, backtrace);
-                        if (Alignment::checkCriteria(res, 0, par.evalThr, par.seqIdThr, par.alnLenThr, par.covMode, par.covThr)) {
+                        if (Alignment::checkCriteria(res,isIdentity, par.evalThr, par.seqIdThr, par.alnLenThr, par.covMode, par.covThr)) {
                             alnResults.emplace_back(res);
                         }
                     } 
@@ -270,6 +295,7 @@ int doalignblock(Parameters &par,
                 if (par.sortResults > 0 && alnResults.size() > 1) {
                     SORT_SERIAL(alnResults.begin(), alnResults.end(), Matcher::compareHits);
                 }
+
                 for (size_t i = 0; i < alnResults.size(); ++i) {
                     size_t len = Matcher::resultToBuffer(buffer, alnResults[i], false, false); // add backtrace false   // gyuri
                     resultBuffer.append(buffer, len);
@@ -277,6 +303,7 @@ int doalignblock(Parameters &par,
 
                 resultWriter.writeData(resultBuffer.c_str(), resultBuffer.length(), queryKey, thread_idx);
                 resultBuffer.clear();
+                alnResults.clear();
             }
         }
     }
@@ -290,6 +317,8 @@ int doalignblock(Parameters &par,
         }
     }
     // delete
+    delete[] fastMatrix.matrix;
+    delete[] fastMatrix.matrixData;
     delete subMat;
     return 0;
 }
