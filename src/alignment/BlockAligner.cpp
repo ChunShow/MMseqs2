@@ -6,7 +6,7 @@
 #include "EvalueComputation.h"
 #include "DistanceCalculator.h"
 
-#define MAX_SIZE 4096
+#define MAX_SIZE 256
 #define MIN_SIZE 32
 
 BlockAligner::BlockAligner(
@@ -16,6 +16,7 @@ BlockAligner::BlockAligner(
     bool compBiasCorrection, float compBiasCorrectionScale,
     int8_t gapOpen, int8_t gapExtend
 ) : 
+    maxSequenceLength(maxSequenceLength),
     gaps({gapOpen, gapExtend}),
     compBiasCorrection(compBiasCorrection),
     compBiasCorrectionScale(compBiasCorrectionScale),
@@ -26,6 +27,9 @@ BlockAligner::BlockAligner(
     range={MIN_SIZE, MAX_SIZE};
     query = block_new_padded_aa(maxSequenceLength, range.max);
     queryBias = block_new_pos_bias(maxSequenceLength, range.max);
+    queryRevNumSeq = new int8_t[maxSequenceLength];
+    memset(queryRevNumSeq, 0, maxSequenceLength * sizeof(int8_t));
+    
     
     
     if (Parameters::isEqualDbtype(dbtype, Parameters::DBTYPE_HMM_PROFILE) == false) {
@@ -47,9 +51,10 @@ BlockAligner::BlockAligner(
     blockTrace = block_new_aa_trace_xdrop(maxSequenceLength, maxSequenceLength, range.max);
     blockNoTrace = block_new_aa_xdrop(maxSequenceLength, maxSequenceLength, range.max);
     cigar = block_new_cigar(maxSequenceLength, maxSequenceLength);
-    sAlnCigar = new uint32_t[maxSequenceLength];
     queryCompBias = new int16_t[maxSequenceLength];
     targetCompBias = new int16_t[maxSequenceLength];
+    queryCompBiasRev = new int16_t[maxSequenceLength];
+    memset(queryCompBiasRev, 0, maxSequenceLength * sizeof(int16_t));
     //set targetCompBias to 0
     memset(targetCompBias, 0, maxSequenceLength * sizeof(int16_t));
     tmpCompBias   = new float[maxSequenceLength];
@@ -68,25 +73,36 @@ BlockAligner::~BlockAligner() {
     } else {
         block_free_aaprofile(bProfile);
     }
-    delete[] sAlnCigar;
     delete[] queryCompBias;
     delete[] targetCompBias;
     delete[] tmpCompBias;
+    delete[] queryRevNumSeq;
+    delete[] queryCompBiasRev;
+    delete[] queryCompBiasRevArr;
 
 }
 
 void BlockAligner::initQuery(Sequence* query){
     currentQuery = query;
-    this->querySeq = query->getSeqData();
-    this->queryNumSeq = query->numSequence;
-    this->queryLength = query->L;
-
+    querySeq = query->getSeqData();
+    queryNumSeq = query->numSequence;
+    queryLength = query->L;
+    //memset queryRevNumSeq
+    memset(queryRevNumSeq, 0, maxSequenceLength * sizeof(int8_t)); // gyuri gg
+    
+    std::reverse_copy(queryNumSeq, queryNumSeq + queryLength, queryRevNumSeq);
     if (Parameters::isEqualDbtype(querySeqType, Parameters::DBTYPE_AMINO_ACIDS)&& compBiasCorrection){
-        SubstitutionMatrix::calcLocalAaBiasCorrection(subMat, this->queryNumSeq, this->queryLength, tmpCompBias, compBiasCorrectionScale);
-        for (int i =0; i < this->queryLength; i++) { 
+        SubstitutionMatrix::calcLocalAaBiasCorrection(subMat, queryNumSeq, queryLength, tmpCompBias, compBiasCorrectionScale);
+        for (int i =0; i < queryLength; i++) { 
 			// queryCompBias[i] = (int8_t) (tmpCompBias[i] < 0.0)? tmpCompBias[i] - 0.5: tmpCompBias[i] + 0.5; //why .5 offset?
-            queryCompBias[i] = (int8_t) (tmpCompBias[i]);
+            queryCompBias[i] = (int16_t) (tmpCompBias[i]);
 		}
+        memset(this->queryCompBiasRev, 0, this->maxSequenceLength * sizeof(int8_t)); // gyuri gg
+        std::reverse_copy(queryCompBias, queryCompBias + this->queryLength, queryCompBiasRev);
+        // memset(queryCompBiasRevArr, 0, maxSequenceLength * sizeof(int16_t));
+        // for (int i = 0; i < queryLength; i++) {
+		// 	queryCompBiasRevArr[i] = queryCompBiasRev[i];
+		// }
     }
 }
 
@@ -94,7 +110,9 @@ void BlockAligner::initQuery(Sequence* query){
 s_align BlockAligner::gappedLocalAlign(
     Sequence* currentTarget,
     int qIdx, int tIdx,
-    Cigar* cigar, int32_t x_drop
+    Cigar* cigar, int32_t x_drop,
+    float covThr,
+    int covMode
 ) {
     s_align local_aln;
 
@@ -106,34 +124,29 @@ s_align BlockAligner::gappedLocalAlign(
     size_t tLen = currentTarget->L;
 
     // forwards alignment starting at (qIdx, tIdx)
-    block_set_bytes_padded_aa_numsequence(query, (uint8_t*)(qNum + qIdx), qLen - qIdx, range.max);
-    block_set_bytes_padded_aa_numsequence(target, (uint8_t*)(tNum + tIdx), tLen - tIdx, range.max);
+    int fqueryAlnLen = qLen - qIdx;
+    int fqueryStartPos = qIdx;
+    int ftargetAlnLen = tLen - tIdx;
+    int ftargetStartPos = tIdx;
+    block_set_bytes_padded_aa_numsequence(query, (uint8_t*)(qNum + fqueryStartPos), fqueryAlnLen, range.max);
+    block_set_bytes_padded_aa_numsequence(target, (uint8_t*)(tNum + ftargetStartPos), ftargetAlnLen, range.max);
     
     // PosBias
-    block_set_pos_bias(queryBias, queryCompBias + qIdx, qLen - qIdx);
-    block_set_pos_bias(targetBias, targetCompBias + tIdx, tLen - tIdx);
+    block_set_pos_bias(queryBias, queryCompBias + fqueryStartPos, fqueryAlnLen);
+    block_set_pos_bias(targetBias, targetCompBias + ftargetStartPos, ftargetAlnLen);
 
     // t_bias = block_new_pos_bias(tLen - tIdx, range.max); // or comment it out since it is full of 0
     block_align_aa_xdrop_posbias(blockNoTrace, query, queryBias, target, targetBias, matrix, gaps, range, x_drop); // forward with no trace
-
     res = block_res_aa_xdrop(blockNoTrace);
 
-    int qEnd = qIdx + res.query_idx - 1;
-    int tEnd = tIdx + res.reference_idx - 1;
-    // float maxQueryCov = SmithWaterman::computeCov(0, qEnd , qLen);
-    // float maxTargetCov = SmithWaterman::computeCov(0, res_aln.tEnd , tLen);
-    // bool hasCov = Util::hasCoverage(par.covThr, par.covMode, maxQueryCov, maxTargetCov);
-    // if (!hasCov) {
-    //     local_aln.evalue = -1.0f; // this should avoid that the hit is added
-    //     local_aln.score1 = -1.0f;
-    //     local_aln.qCov = 0.0f;
-    //     local_aln.tCov = 0.0f;
-    //     return local_aln;
-    // }
+    int qEnd = qIdx + res.query_idx;
+    int tEnd = tIdx + res.reference_idx;
     
-    // Debug(Debug::ERROR) << "end position: " << res_aln.qEnd << "\t" << res_aln.tEnd << "\n";
-    // if (res_aln.qEnd <=0 || res_aln.tEnd <=0) {
-    if (qEnd == SIZE_MAX || tEnd == SIZE_MAX) {
+    float tmpqcov = SmithWaterman::computeCov(0, qEnd, currentQuery->L);
+    float tmptcov = SmithWaterman::computeCov(0, tEnd, currentTarget->L);
+    bool hasCov = Util::hasCoverage(covThr, covMode, tmpqcov, tmptcov);
+    
+    if (res.query_idx == SIZE_MAX || res.reference_idx == SIZE_MAX || !hasCov) {
         // Debug(Debug::ERROR) << "wrong end position: " << qEnd << "\t" << tEnd << "\n";
         local_aln.score1 = -1.0f;
         local_aln.qCov = 0.0f;
@@ -141,37 +154,37 @@ s_align BlockAligner::gappedLocalAlign(
         local_aln.evalue = -1.0f; // this should avoid that the hit is added
         return local_aln;
     }
-    // reversed alignment starting at the max score location from forwards alignment
-    block_set_bytes_rev_padded_aa_numsequence(query, (uint8_t*)qNum, qEnd, range.max);
-    block_set_bytes_rev_padded_aa_numsequence(target, (uint8_t*)tNum, tEnd, range.max);
     
+
+    // Backward full alignment
+    int bqueryAlnLen = qEnd +1;
+    int bqueryStartPos = qLen - bqueryAlnLen;
+    int btargetAlnLen = tEnd +1;
+    int btargetStartPos = tLen - btargetAlnLen;
+
+    int8_t* targetRevNumSeq = new int8_t[tLen];
+	std::reverse_copy(tNum, tNum + tLen, targetRevNumSeq);
+
+    block_set_bytes_padded_aa_numsequence(query, (uint8_t*)(queryRevNumSeq + bqueryStartPos), bqueryAlnLen, range.max);
+    block_set_bytes_padded_aa_numsequence(target, (uint8_t*)(targetRevNumSeq + btargetStartPos), btargetAlnLen, range.max);
     //PosBias
-    block_set_rev_pos_bias(queryBias, queryCompBias, qEnd);
-    block_set_rev_pos_bias(targetBias, targetCompBias, tEnd);
+    block_set_pos_bias(queryBias, queryCompBiasRev + bqueryStartPos, bqueryAlnLen);
+    block_set_pos_bias(targetBias, targetCompBias + btargetStartPos, btargetAlnLen); // 0 
 
     block_align_aa_trace_xdrop_posbias(blockTrace, query, queryBias, target, targetBias, matrix, gaps, range, x_drop);
     res = block_res_aa_trace_xdrop(blockTrace);
-    block_cigar_eq_aa_trace_xdrop(blockTrace, query, target, res.query_idx, res.reference_idx, cigar);
+    block_cigar_aa_trace_xdrop(blockTrace, res.query_idx, res.reference_idx, cigar);
 
-    int qStart = qEnd - res.query_idx;
-    int tStart = tEnd - res.reference_idx;
     int score = res.score;
-
-    float qcov = SmithWaterman::computeCov(qStart, qEnd, qLen);
-    float tcov = SmithWaterman::computeCov(tStart, tEnd, tLen);
-
     double evalue = evaluer->computeEvalue(score, qLen);
     int bitScore = static_cast<int>(evaluer->computeBitScore(score) + 0.5);
-    
+    local_aln.qStartPos1 = qEnd - res.query_idx;
+    local_aln.dbStartPos1 = tEnd - res.reference_idx;
     local_aln.score1 = bitScore;
-    local_aln.qStartPos1 = qStart;
     local_aln.qEndPos1 = qEnd;
-    local_aln.dbStartPos1 = tStart;
     local_aln.dbEndPos1 = tEnd;
-    local_aln.qCov = qcov;
-    local_aln.tCov = tcov;
     local_aln.evalue = evalue;
-
+    delete[] targetRevNumSeq;
     return local_aln;
 }
 
@@ -284,11 +297,11 @@ BlockAligner::align(
     size_t qIdx,
     size_t tIdx,
     std::string& backtrace,
-    int xdrop
+    int xdrop,
+    float covThr,
+    int covMode
 ) {
-    //reset sAlnCigar
-    memset(sAlnCigar, 0, sizeof(uint32_t) * currentQuery->L);
-    s_align local_aln = gappedLocalAlign(currentTarget, qIdx, tIdx, cigar, xdrop);
+    s_align local_aln = gappedLocalAlign(currentTarget, qIdx, tIdx, cigar, xdrop, covThr, covMode);
 
     int aaIds = 0;
     size_t cigarLength = block_len_cigar(cigar);
@@ -296,102 +309,41 @@ BlockAligner::align(
     int targetPos = 0;
     int queryStartPos = local_aln.qEndPos1;
     int targetStartPos = local_aln.dbEndPos1;
-    const unsigned char* qNum = currentQuery->numSequence;
-    const unsigned char* tNum = currentTarget->numSequence;
+    const char* qNum = currentQuery->getSeqData();
+    const char* tNum = currentTarget->getSeqData();
+    // std::cout << "qstart: " << local_aln.qStartPos1 << " qend: " << local_aln.qEndPos1 << " cigarLength: " << cigarLength << std::endl;
     for (size_t c = 0; c < cigarLength; c++) {
-        OpLen o = block_get_cigar(cigar, c);
-        char letter = ops_char[o.op];
-        switch (letter) {
-            case '=':
-                aaIds += length;
-                // FALLTHROUGH
-            case 'X':
-                // FALLTHROUGH
-            case 'M':
-                queryPos += length;
-                targetPos += length;
-                backtrace.append(length, 'M');
-                sAlnCigar[c] = SmithWaterman::to_cigar_int(length, 'M');
-                break;
-            case 'I':
-                queryPos += length;
-                backtrace.append(length, 'I');
-                sAlnCigar[c] = SmithWaterman::to_cigar_int(length, 'I');
-                break;
-            case 'D':
-                targetPos += length;
-                backtrace.append(length, 'D');
-                sAlnCigar[c] = SmithWaterman::to_cigar_int(length, 'D');
-                break;
+        if (queryStartPos - queryPos < 0 || targetStartPos - targetPos < 0) {
+            std::cout << "Error in backward alignment backtrace! Index out of bounds. queryStartPos - queryPos: " << queryStartPos - queryPos << " targetStartPos - targetPos: " << targetStartPos - targetPos << std::endl;
+            EXIT(EXIT_FAILURE);
         }
-        alnLength += length;
-        // if(o.op == 1 || o.op == 2){
-        //     for(size_t j = 0; j < o.len; j++){
-        //         // change traceback with int not char
-        //         if(qNum[-queryPos - j + queryStartPos] == tNum[-targetPos - j + targetStartPos]){
-        //             aaIds++;
-        //         }
-        //     }
-        //     queryPos += o.len;
-        //     targetPos += o.len;
-        //     backtrace.append(o.len,'M');
-        // }else if(o.op == 4){
-        //     queryPos += o.len;
-        //     backtrace.append(o.len,'I');
-        // }else if(o.op == 5){
-        //     targetPos += o.len;
-        //     backtrace.append(o.len,'D');
-        // }
+        OpLen o = block_get_cigar(cigar, c);
+        if(o.op == 1){
+            for(size_t j = 0; j < o.len; j++){
+                // change traceback with int not char
+                if(qNum[-queryPos - j + queryStartPos] == tNum[-targetPos - j + targetStartPos]){
+                    aaIds++;
+                }
+            }
+            queryPos += o.len;
+            targetPos += o.len;
+            backtrace.append(o.len,'M');
+        }else if(o.op == 4){
+            queryPos += o.len;
+            backtrace.append(o.len,'I');
+        }else if(o.op == 5){
+            targetPos += o.len;
+            backtrace.append(o.len,'D');
+        }
     }
 
     std::reverse(backtrace.begin(), backtrace.end());
-
-
- 
-    // // Note: 'M' signals either a match or mismatch
-    // char ops_char[] = {' ', 'M', '=', 'X', 'I', 'D'};
-
-    // int alnLength = 0;
-    // size_t cigarLength = block_len_cigar(cigar);
-    // size_t aaIds = 0;
-    // if (cigarLength > 0) {
-    //     int32_t targetPos = 0, queryPos = 0;
-    //     for (unsigned long c = 0; c < cigarLength; ++c) {
-    //         OpLen o = block_get_cigar(cigar, cigarLength - 1 - c);
-    //         char letter = ops_char[o.op];
-    //         uint32_t length = o.len;
-
-    //         switch (letter) {
-    //             case '=':
-    //                 aaIds += length;
-    //                 // FALLTHROUGH
-    //             case 'X':
-    //                 // FALLTHROUGH
-    //             case 'M':
-    //                 queryPos += length;
-    //                 targetPos += length;
-    //                 backtrace.append(length, 'M');
-    //                 sAlnCigar[c] = SmithWaterman::to_cigar_int(length, 'M');
-    //                 break;
-    //             case 'I':
-    //                 queryPos += length;
-    //                 backtrace.append(length, 'I');
-    //                 sAlnCigar[c] = SmithWaterman::to_cigar_int(length, 'I');
-    //                 break;
-    //             case 'D':
-    //                 targetPos += length;
-    //                 backtrace.append(length, 'D');
-    //                 sAlnCigar[c] = SmithWaterman::to_cigar_int(length, 'D');
-    //                 break;
-    //         }
-    //         alnLength += length;
-    //     }
-    // }
-
+    local_aln.qStartPos1 = (local_aln.qEndPos1+1) - queryPos;
+	local_aln.dbStartPos1 = (local_aln.dbEndPos1+1) - targetPos;
+    local_aln.qCov = SmithWaterman::computeCov(local_aln.qStartPos1, local_aln.qEndPos1, currentQuery->L);
+	local_aln.tCov = SmithWaterman::computeCov(local_aln.dbStartPos1, local_aln.dbEndPos1, currentTarget->L);
     local_aln.score2 = 0;
     local_aln.ref_end2 = -1;
-    local_aln.cigar = sAlnCigar;
-    local_aln.cigarLen = cigarLength;
     local_aln.identicalAACnt = aaIds;
     return local_aln;
 }
@@ -413,29 +365,33 @@ s_align BlockAligner::gappedLocalAlignForward(
     size_t tLen = currentTarget->L;
 
     // forwards alignment starting at (qIdx, tIdx)
-    block_set_bytes_padded_aa_numsequence(query, (uint8_t*)(qNum + qIdx), qLen - qIdx, range.max);
-    block_set_bytes_padded_aa_numsequence(target, (uint8_t*)(tNum + tIdx), tLen - tIdx, range.max);
+    int fqueryAlnLen = qLen - qIdx;
+    int fqueryStartPos = qIdx;
+    int ftargetAlnLen = tLen - tIdx;
+    int ftargetStartPos = tIdx;
+    block_set_bytes_padded_aa_numsequence(query, (uint8_t*)(qNum + fqueryStartPos), fqueryAlnLen, range.max);
+    block_set_bytes_padded_aa_numsequence(target, (uint8_t*)(tNum + ftargetStartPos), ftargetAlnLen, range.max);
     
     // PosBias
-    block_set_pos_bias(queryBias, queryCompBias + qIdx, qLen - qIdx);
-    block_set_pos_bias(targetBias, targetCompBias + tIdx, tLen - tIdx);
+    block_set_pos_bias(queryBias, queryCompBias + fqueryStartPos, fqueryAlnLen);
+    block_set_pos_bias(targetBias, targetCompBias + ftargetStartPos, ftargetAlnLen);
 
     block_align_aa_trace_xdrop_posbias(blockTrace, query, queryBias, target, targetBias, matrix, gaps, range, x_drop); // forward with no trace
     res = block_res_aa_xdrop(blockTrace);
-    block_cigar_eq_aa_trace_xdrop(blockTrace, query, target, res.query_idx, res.reference_idx, cigar);
+    block_cigar_aa_trace_xdrop(blockTrace, res.query_idx, res.reference_idx, cigar);
 
-    int qEnd = qIdx + res.query_idx - 1;
-    int tEnd = tIdx + res.reference_idx - 1;
+    int qEnd = qIdx + res.query_idx;
+    int tEnd = tIdx + res.reference_idx;
     
-    // if (res_aln.qEnd <=0 || res_aln.tEnd <=0) {
-    if (qEnd == SIZE_MAX || tEnd == SIZE_MAX) {
-        Debug(Debug::ERROR) << "wrong end position: " << qEnd << "\t" << tEnd << "\n";
+    if (res.query_idx == SIZE_MAX || res.reference_idx == SIZE_MAX) {
+        // Debug(Debug::ERROR) << "wrong end position: " << qEnd << "\t" << tEnd << "\n";
         local_aln.score1 = -1.0f;
         local_aln.qCov = 0.0f;
         local_aln.tCov = 0.0f;
         local_aln.evalue = -1.0f; // this should avoid that the hit is added
         return local_aln;
     }
+
     
     local_aln.qEndPos1 = qEnd;
     local_aln.dbEndPos1 = tEnd;
@@ -454,34 +410,42 @@ s_align BlockAligner::gappedLocalAlignBackward(
 
     AlignResult res;
     res.score = -1000000000;
-    const unsigned char* qNum = currentQuery->numSequence;
-    const unsigned char* tNum = currentTarget->numSequence;
     size_t qLen = currentQuery->L;
     size_t tLen = currentTarget->L;
-
-    Cigar* cigarBackward = block_new_cigar(res.query_idx, res.reference_idx);
+    
+    const unsigned char* tNum = currentTarget->numSequence;
     // reversed alignment starting at the max score location from forwards alignment
-    block_set_bytes_rev_padded_aa_numsequence(query, (uint8_t*) qNum, qIdx +1, range.max);
-    block_set_bytes_rev_padded_aa_numsequence(target, (uint8_t*) tNum, tIdx +1, range.max);
+    int fqueryAlnLen = qIdx +1;
+    int fqueryStartPos = qLen - fqueryAlnLen;
+    int ftargetAlnLen = tIdx +1;
+    int ftargetStartPos = tLen - ftargetAlnLen;
+    int8_t* targetRevNumSeq = new int8_t[tLen];
+	std::reverse_copy(tNum, tNum + tLen, targetRevNumSeq);
+
+    block_set_bytes_padded_aa_numsequence(query, (uint8_t*)(queryRevNumSeq + fqueryStartPos), fqueryAlnLen, range.max);
+    block_set_bytes_padded_aa_numsequence(target, (uint8_t*)(targetRevNumSeq + ftargetStartPos), ftargetAlnLen, range.max);
     
     //PosBias
-    block_set_rev_pos_bias(queryBias, queryCompBias, qIdx +1 );
-    block_set_rev_pos_bias(targetBias, targetCompBias, tIdx +1);
+    block_set_pos_bias(queryBias, queryCompBiasRev + fqueryStartPos, fqueryAlnLen);
+    block_set_pos_bias(targetBias, targetCompBias + ftargetStartPos, ftargetAlnLen);
 
     block_align_aa_trace_xdrop_posbias(blockTrace, query, queryBias, target, targetBias, matrix, gaps, range, x_drop);
     res = block_res_aa_trace_xdrop(blockTrace);
-    block_cigar_eq_aa_trace_xdrop(blockTrace, query, target, res.query_idx, res.reference_idx, cigar);
+    block_cigar_aa_trace_xdrop(blockTrace, res.query_idx, res.reference_idx, cigar);
+    if (res.query_idx == SIZE_MAX || res.reference_idx == SIZE_MAX) {
+        // Debug(Debug::ERROR) << "wrong end position: " << qEnd << "\t" << tEnd << "\n";
+        local_aln.score1 = -1.0f;
+        local_aln.qCov = 0.0f;
+        local_aln.tCov = 0.0f;
+        local_aln.evalue = -1.0f; // this should avoid that the hit is added
+        return local_aln;
+    }
 
-    int qStart = qIdx - res.query_idx +1;
-    int tStart = tIdx - res.reference_idx +1;
-    int score = res.score;
-
-    local_aln.qStartPos1 = qStart;
-    local_aln.dbStartPos1 = tStart;
     local_aln.score1 = res.score;
-
+    delete[] targetRevNumSeq;
     return local_aln;
 }
+
 
 s_align
 BlockAligner::bandedalignForward(
@@ -491,56 +455,116 @@ BlockAligner::bandedalignForward(
     std::string& backtrace,
     int xdrop
 ) {
-    memset(sAlnCigar, 0, sizeof(uint32_t) * currentQuery->L);
     //forward
     s_align local_aln = gappedLocalAlignForward(currentTarget, qIdx, tIdx, cigar, xdrop);
-    // s_align local_alnBackward = gappedLocalAlignBackward(currentTarget, qIdx, tIdx, cigar, xdrop);
-    // Note: 'M' signals either a match or mismatch
-    char ops_char[] = {' ', 'M', '=', 'X', 'I', 'D'};
-    int alnLength = 0;
+    
+    int aaIds = 0;
     size_t cigarLength = block_len_cigar(cigar);
-    size_t aaIds = 0;
-    if (cigarLength > 0) {
-        int32_t targetPos = 0, queryPos = 0;
-        for (unsigned long c = 0; c < cigarLength; ++c) {
-            OpLen o = block_get_cigar(cigar, c);
-            char letter = ops_char[o.op];
-            uint32_t length = o.len;
-
-            switch (letter) {
-                case '=':
-                    aaIds += length;
-                    // FALLTHROUGH
-                case 'X':
-                    // FALLTHROUGH
-                case 'M':
-                    queryPos += length;
-                    targetPos += length;
-                    backtrace.append(length, 'M');
-                    sAlnCigar[c] = SmithWaterman::to_cigar_int(length, 'M');
-                    break;
-                case 'I':
-                    queryPos += length;
-                    backtrace.append(length, 'I');
-                    sAlnCigar[c] = SmithWaterman::to_cigar_int(length, 'I');
-                    break;
-                case 'D':
-                    targetPos += length;
-                    backtrace.append(length, 'D');
-                    sAlnCigar[c] = SmithWaterman::to_cigar_int(length, 'D');
-                    break;
+    int queryPos = 0;
+    int targetPos = 0;
+    const char* qNum = currentQuery->getSeqData();
+    const char* tNum = currentTarget->getSeqData();
+    int queryStartPos = local_aln.qEndPos1;
+    int targetStartPos = local_aln.dbEndPos1;
+    // Note: 'M' signals either a match or mismatch
+    for (size_t c = 0; c < cigarLength; c++) {
+        OpLen o = block_get_cigar(cigar, c);
+        if(o.op == 1){
+            for(size_t j = 0; j < o.len; j++){
+                // change traceback with int not char
+                if(qNum[-queryPos - j + queryStartPos] == tNum[-targetPos - j + targetStartPos]){
+                    aaIds++;
+                }
             }
-            alnLength += length;
+            queryPos += o.len;
+            targetPos += o.len;
+            backtrace.append(o.len,'M');
+        }else if(o.op == 4){
+            queryPos += o.len;
+            backtrace.append(o.len,'I');
+        }else if(o.op == 5){
+            targetPos += o.len;
+            backtrace.append(o.len,'D');
         }
     }
+    if (cigarLength >0){
+        if (backtrace.back() != 'M') {
+            std::cout << "Error in forward cigar! first char is not M. It is " << backtrace.front() << std::endl;
+        }
+    }
+    std::reverse(backtrace.begin(), backtrace.end());
+    // if (qIdx + queryPos -1 != local_aln.qEndPos1 || tIdx + targetPos -1 != local_aln.dbEndPos1) {
+    //     std::cout << "Calculated qEndPos1: " << qIdx + queryPos -1 << " stored qEndPos1: " << local_aln.qEndPos1 << " Calculated dbEndPos1: " << tIdx + targetPos -1 << " stored dbEndPos1: " << local_aln.dbEndPos1 << std::endl;
 
+    // }
+    local_aln.qEndPos1 = qIdx + queryPos -1;
+    local_aln.dbEndPos1 = tIdx + targetPos -1;
     local_aln.score2 = 0;
     local_aln.ref_end2 = -1;
-    local_aln.cigar = sAlnCigar;
-    local_aln.cigarLen = cigarLength;
     local_aln.identicalAACnt = aaIds;
     return local_aln;
 }
+
+
+
+// s_align
+// BlockAligner::bandedalignForward(
+//     Sequence* currentTarget,
+//     size_t qIdx,
+//     size_t tIdx,
+//     std::string& backtrace,
+//     int xdrop
+// ) {
+//     //forward
+//     s_align local_aln = gappedLocalAlignForward(currentTarget, qIdx, tIdx, cigar, xdrop);
+    
+//     int aaIds = 0;
+//     size_t cigarLength = block_len_cigar(cigar);
+//     int queryPos = 0;
+//     int targetPos = 0;
+//     const char* qNum = currentQuery->getSeqData();
+//     const char* tNum = currentTarget->getSeqData();
+//     // Note: 'M' signals either a match or mismatch
+//     for (size_t c = 0; c < cigarLength; c++) {
+//         if (qIdx + queryPos > currentQuery->L || tIdx + targetPos > currentTarget->L) {
+//             std::cout << "Error in forward alignment backtrace! Index out of bounds. qIdx + queryPos: " << qIdx + queryPos << " tIdx + targetPos: " << tIdx + targetPos << " currentQuery->L: " << currentQuery->L << " currentTarget->L: " << currentTarget->L << std::endl;
+//             std::cout << "qIx: " << qIdx << " tIdx:" << tIdx << std::endl;
+//             std::cout << "queryPos: " << queryPos << " targetPos: " << targetPos << std::endl;
+//             std::cout << "qEndPos1: " << local_aln.qEndPos1 << " dbEndPos1: " << local_aln.dbEndPos1 << std::endl;
+//             std::cout << "score1: " << local_aln.score1 << std::endl;
+//             EXIT(EXIT_FAILURE);
+//         }
+//         OpLen o = block_get_cigar(cigar, c);
+//         if(o.op == 1){
+//             for(size_t j = 0; j < o.len; j++){
+//                 // change traceback with int not char
+//                 if(qNum[qIdx + j + queryPos] == tNum[tIdx + j + targetPos]){
+//                     aaIds++;
+//                 }
+//             }
+//             queryPos += o.len;
+//             targetPos += o.len;
+//             backtrace.append(o.len,'M');
+//         }else if(o.op == 4){
+//             queryPos += o.len;
+//             backtrace.append(o.len,'I');
+//         }else if(o.op == 5){
+//             targetPos += o.len;
+//             backtrace.append(o.len,'D');
+//         }
+//     }
+//     if (cigarLength >0){
+//         if (backtrace.front() != 'M') {
+//             std::cout << "Error in forward cigar! first char is not M. It is " << backtrace.front() << std::endl;
+//         }
+//     }
+//     local_aln.qEndPos1 = qIdx + queryPos -1;
+//     local_aln.dbEndPos1 = tIdx + targetPos -1;
+//     local_aln.score2 = 0;
+//     local_aln.ref_end2 = -1;
+//     local_aln.identicalAACnt = aaIds;
+//     return local_aln;
+// }
 
 
 s_align
@@ -552,52 +576,52 @@ BlockAligner::bandedalignBackward(
     int xdrop
 ) {
     //Backward
-    memset(sAlnCigar, 0, sizeof(uint32_t) * currentQuery->L);
     s_align local_aln = gappedLocalAlignBackward(currentTarget, qIdx, tIdx, cigar, xdrop);
-    // s_align local_alnBackward = gappedLocalAlignBackward(currentTarget, qIdx, tIdx, cigar, xdrop);
-    // Note: 'M' signals either a match or mismatch
-    char ops_char[] = {' ', 'M', '=', 'X', 'I', 'D'};
-    int alnLength = 0;
+    
+    int aaIds = 0;
     size_t cigarLength = block_len_cigar(cigar);
-    size_t aaIds = 0;
-    if (cigarLength > 0) {
-        int32_t targetPos = 0, queryPos = 0;
-        for (unsigned long c = 0; c < cigarLength; ++c) {
-            OpLen o = block_get_cigar(cigar, cigarLength - 1 - c);
-            char letter = ops_char[o.op];
-            uint32_t length = o.len;
+    int queryPos = 0;
+    int targetPos = 0;
+    int queryStartPos = qIdx;
+    int targetStartPos = tIdx;
+    const char* qNum = currentQuery->getSeqData();
+    const char* tNum = currentTarget->getSeqData();
 
-            switch (letter) {
-                case '=':
-                    aaIds += length;
-                    // FALLTHROUGH
-                case 'X':
-                    // FALLTHROUGH
-                case 'M':
-                    queryPos += length;
-                    targetPos += length;
-                    backtrace.append(length, 'M');
-                    sAlnCigar[c] = SmithWaterman::to_cigar_int(length, 'M');
-                    break;
-                case 'I':
-                    queryPos += length;
-                    backtrace.append(length, 'I');
-                    sAlnCigar[c] = SmithWaterman::to_cigar_int(length, 'I');
-                    break;
-                case 'D':
-                    targetPos += length;
-                    backtrace.append(length, 'D');
-                    sAlnCigar[c] = SmithWaterman::to_cigar_int(length, 'D');
-                    break;
+    for (size_t c = 0; c < cigarLength; c++) {
+        if (queryStartPos - queryPos < 0 || targetStartPos - targetPos < 0) {
+            std::cout << "Error in backward alignment backtrace! Index out of bounds. queryStartPos - queryPos: " << queryStartPos - queryPos << " targetStartPos - targetPos: " << targetStartPos - targetPos << std::endl;
+            EXIT(EXIT_FAILURE);
+        }
+        OpLen o = block_get_cigar(cigar, c);
+        if(o.op == 1){
+            for(size_t j = 0; j < o.len; j++){
+                // change traceback with int not char
+                if(qNum[-queryPos - j + queryStartPos] == tNum[-targetPos - j + targetStartPos]){
+                    aaIds++;
+                }
             }
-            alnLength += length;
+            queryPos += o.len;
+            targetPos += o.len;
+            backtrace.append(o.len,'M');
+        }else if(o.op == 4){
+            queryPos += o.len;
+            backtrace.append(o.len,'I');
+        }else if(o.op == 5){
+            targetPos += o.len;
+            backtrace.append(o.len,'D');
         }
     }
+    // if (cigarLength >0){
+    //     if (backtrace.back() != 'M') {
+    //         std::cout << "Error in backward cigar! last char is not M. It is " << backtrace.back() << std::endl;
+    //     }
+    // }
+    std::reverse(backtrace.begin(), backtrace.end());
 
+    local_aln.qStartPos1 = (qIdx + 1) - queryPos;
+	local_aln.dbStartPos1 = (tIdx + 1) - targetPos;
     local_aln.score2 = 0;
     local_aln.ref_end2 = -1;
-    local_aln.cigar = sAlnCigar;
-    local_aln.cigarLen = cigarLength;
     local_aln.identicalAACnt = aaIds;
     return local_aln;
 }
@@ -609,18 +633,33 @@ BlockAligner::bandedalign(
     size_t qIdx,
     size_t tIdx,
     std::string& backtrace,
-    int xdrop
+    int xdrop,
+    float covThr,
+    int covMode
 ) {
     s_align local_aln;
-    // std::cout << "qIdx: " << qIdx << ", tIdx: " << tIdx << "\n";
-    memset(sAlnCigar, 0, sizeof(uint32_t) * currentQuery->L);
-    
+
+    //Forward
+    std::string backtrace_forward;
+    s_align local_aln_Forward = bandedalignForward(currentTarget, qIdx, tIdx, backtrace_forward, xdrop);
+    float tmpqcov = SmithWaterman::computeCov(0, local_aln_Forward.qEndPos1, currentQuery->L);
+    float tmptcov = SmithWaterman::computeCov(0, local_aln_Forward.dbEndPos1, currentTarget->L);
+    bool hasCov = Util::hasCoverage(covThr, covMode, tmpqcov, tmptcov);
+    if (!hasCov) {
+        local_aln.score1 = -1.0f;
+        local_aln.qCov = 0.0f;
+        local_aln.tCov = 0.0f;
+        local_aln.evalue = -1.0f; // this should avoid that the hit is added
+        return local_aln;
+    }
+
     //Backward
     s_align local_aln_Backward;
     std::string backtrace_backward;
     if (qIdx > 0 && tIdx > 0) {
         local_aln_Backward = bandedalignBackward(currentTarget, qIdx, tIdx, backtrace_backward, xdrop);
 
+    //     local_aln_Backward = bandedalignBackward(currentTarget, qIdx, tIdx, backtrace_backward, xdrop);
     } else {
         local_aln_Backward.qStartPos1 = qIdx;
         local_aln_Backward.dbEndPos1 = tIdx;
@@ -628,22 +667,12 @@ BlockAligner::bandedalign(
         local_aln_Backward.identicalAACnt = 0;
     }
 
-    //Forward
-    std::string backtrace_forward;
-    s_align local_aln_Forward = bandedalignForward(currentTarget, qIdx, tIdx, backtrace_forward, xdrop);
-    if (qIdx > 0 && tIdx > 0) {
-        // if backtrac_backward is empty-> print qIdx and tIdx
-        if (backtrace_backward.empty()) {
-            std::cout << "qIdx: " << qIdx << ", tIdx: " << tIdx << "\n";
-        }
-        if (backtrace_backward.back() != backtrace_forward.front()) {
-            //remove one operation to avoid double counting the position at (qIdx, tIdx)
-            std::cout << "backtrace_backward: " << backtrace_backward << "\n";
-            std::cout << "backtrace_forward: " << backtrace_forward << "\n";
-        }
-    }
+    
     //combine backtrace
-    backtrace = backtrace_backward;;
+    if (backtrace_backward.empty() == false){
+        backtrace = backtrace_backward;
+        backtrace.pop_back(); // remove last character to avoid double counting the position at (qIdx, tIdx)
+    }
     backtrace.append(backtrace_forward);
 
     local_aln.qStartPos1 = local_aln_Backward.qStartPos1;
@@ -652,10 +681,6 @@ BlockAligner::bandedalign(
     local_aln.dbEndPos1 = local_aln_Forward.dbEndPos1;
     local_aln.score1 = local_aln_Forward.score1 + local_aln_Backward.score1; // temporary
     local_aln.identicalAACnt = local_aln_Forward.identicalAACnt + local_aln_Backward.identicalAACnt -1 ; // temporary
-    // sum of two cigars
-    // uint32_t* concat = new uint32_t[size1 + size2];
-    local_aln.cigar = local_aln_Forward.cigar; // temporary
-    local_aln.cigarLen = local_aln_Backward.cigarLen + local_aln_Forward.cigarLen; // temporary
 
     float qcov = SmithWaterman::computeCov(local_aln.qStartPos1, local_aln.qEndPos1, currentQuery->L);
     float tcov = SmithWaterman::computeCov(local_aln.dbStartPos1, local_aln.dbEndPos1, currentTarget->L);

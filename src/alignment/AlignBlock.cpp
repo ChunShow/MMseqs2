@@ -20,7 +20,7 @@
 #endif
 
 
-#define MAX_SIZE 4096
+#define MAX_SIZE 256
 #define MIN_SIZE 32
 
 static float parsePrecisionLib(const std::string &scoreFile, double targetSeqid, double targetCov, double targetPrecision) {
@@ -238,53 +238,58 @@ int doalignblock(Parameters &par,
 
                     int new_qStartPos = qStartPos;
                     int new_tStartPos = tStartPos;
+                    if (qStartPos == -1 || tStartPos == -1) {
+                        continue; // temporary gyuri
+                    }
 
                     bool foundMatch = false;
 
-                    // for (int offset = 0; offset < alnLen; ++offset) {
-                    //     // mid - offset (left)
-                    //     int j_left = mid - offset;
-                    //     if (j_left >= 0) {
-                    //         int qpos = qStartPos + j_left;
-                    //         int dbpos = tStartPos + j_left;
-                    //         if (querySeq[qpos] == targetSeq[dbpos]) {
-                    //             new_qStartPos = qpos;
-                    //             new_tStartPos = dbpos;
-                    //             foundMatch = true;
-                    //             break;
-                    //         }
-                    //     }
+                    for (int offset = 0; offset < alnLen; ++offset) {
+                        // mid - offset (left)
+                        int j_left = mid - offset;
+                        if (j_left >= 0) {
+                            int qpos = qStartPos + j_left;
+                            int dbpos = tStartPos + j_left;
+                            if (querySeq[qpos] == targetSeq[dbpos]) {
+                                new_qStartPos = qpos;
+                                new_tStartPos = dbpos;
+                                foundMatch = true;
+                                break;
+                            }
+                        }
 
-                    //     // mid + offset (right)
-                    //     int j_right = mid + offset;
-                    //     if (j_right < alnLen) {
-                    //         int qpos = qStartPos + j_right;
-                    //         int dbpos = tStartPos + j_right;
-                    //         if (querySeq[qpos] == targetSeq[dbpos]) {
-                    //             new_qStartPos = qpos;
-                    //             new_tStartPos = dbpos;
-                    //             foundMatch = true;
-                    //             break;
-                    //         }
-                    //     }
-                    // }
-                    for (int j=0; j < alnLen; ++j){
-                        int qpos = qStartPos + j;
-                        int dbpos = tStartPos + j;
-                        if (querySeq[qpos] == targetSeq[dbpos]) {
-                            new_qStartPos = qpos;
-                            new_tStartPos = dbpos;
-                            foundMatch = true;
-                            break;
+                        // mid + offset (right)
+                        int j_right = mid + offset;
+                        if (j_right < alnLen) {
+                            int qpos = qStartPos + j_right;
+                            int dbpos = tStartPos + j_right;
+                            if (querySeq[qpos] == targetSeq[dbpos]) {
+                                new_qStartPos = qpos;
+                                new_tStartPos = dbpos;
+                                foundMatch = true;
+                                break;
+                            }
                         }
                     }
+                    // for (int j=0; j < alnLen; ++j){
+                    //     int qpos = qStartPos + j;
+                    //     int dbpos = tStartPos + j;
+                    //     if (querySeq[qpos] == targetSeq[dbpos]) {
+                    //         new_qStartPos = qpos;
+                    //         new_tStartPos = dbpos;
+                    //         foundMatch = true;
+                    //         break;
+                    //     }
+                    // }
+            
                     
                     if(foundMatch) {
                         std::string backtrace;
-                        s_align alignment = blockaligner.align(&target, new_qStartPos, new_tStartPos, backtrace, x_drop);
+                        s_align alignment = blockaligner.align(&target, new_qStartPos, new_tStartPos, backtrace, x_drop, par.covThr, par.covMode);
+                        // s_align alignment = blockaligner.bandedalign(&target, new_qStartPos, new_tStartPos, backtrace, x_drop, par.covThr, par.covMode);
                         unsigned int alnLength = backtrace.size(); // Is it correct?
                         double seqId = Util::computeSeqId(par.seqIdMode, alignment.identicalAACnt, query.L, targetLen, alnLength);
-                        Matcher::result_t res = Matcher::result_t(targetKey, alignment.score1, alignment.qCov, alignment.tCov, seqId, alignment.evalue, alnLen,
+                        Matcher::result_t res = Matcher::result_t(targetKey, alignment.score1, alignment.qCov, alignment.tCov, seqId, alignment.evalue, alnLength,
                                                     alignment.qStartPos1, alignment.qEndPos1, query.L, alignment.dbStartPos1, alignment.dbEndPos1, targetLen, backtrace);
                         if (Alignment::checkCriteria(res,isIdentity, par.evalThr, par.seqIdThr, par.alnLenThr, par.covMode, par.covThr)) {
                             alnResults.emplace_back(res);

@@ -26,10 +26,10 @@ public:
         float tcov;
         double eval;
         int alnLen;
-        size_t qStart;
-        size_t tStart;
-        size_t qEnd;
-        size_t tEnd;
+        int qStart;
+        int tStart;
+        int qEnd;
+        int tEnd;
         int diagonalLen;
         int score;
         int diagonal;
@@ -49,13 +49,17 @@ public:
         size_t qStart,
         size_t tStart,
         std::string& backtrace,
-        int xdrop
+        int xdrop,
+        float covThr,
+        int covMode
     );
 
     s_align gappedLocalAlign(
         Sequence* currentTarget,
         int q_idx, int t_idx,
-        Cigar* cigar, int32_t x_drop
+        Cigar* cigar, int32_t x_drop,
+        float covThr,
+        int covMode
     );
 
     s_align bandedalignForward(
@@ -71,7 +75,9 @@ public:
         size_t qIdx,
         size_t tIdx,
         std::string& backtrace,
-        int xdrop
+        int xdrop,
+        float covThr,
+        int covMode
     );
 
     s_align bandedalignBackward(
@@ -94,7 +100,8 @@ public:
     );
 
 private:
-    // holds values of the current active query
+    size_t maxSequenceLength;    
+// holds values of the current active query
     Sequence * currentQuery;
 
     PaddedBytes* query;
@@ -106,7 +113,6 @@ private:
     BlockHandle blockTrace;
     BlockHandle blockNoTrace;
     Cigar* cigar;
-    uint32_t* sAlnCigar;
     
     SizeRange range;
     // costs to open and extend a gap
@@ -129,7 +135,10 @@ private:
     std::string queryConsensus;
     int16_t* queryCompBias;
     int16_t* targetCompBias;
+    int16_t* queryCompBiasRevArr;
     float *tmpCompBias;
+    int8_t* queryRevNumSeq;
+    int16_t* queryCompBiasRev;
     
 };
 

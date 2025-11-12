@@ -520,7 +520,7 @@ s_align SmithWaterman::alignStartPosBacktraceBlock(
 
 	//reverse backtrace
 	std::reverse(backtrace.begin(), backtrace.end());
-	r.qStartPos1 = (r.qEndPos1 + 1) - queryPos;
+	r.qStartPos1 = (r.qEndPos1 + 1) - queryPos; // index check // gyuri
 	r.dbStartPos1 = (r.dbEndPos1 + 1) - targetPos;
 
 	r.qCov = computeCov(r.qStartPos1, r.qEndPos1, query_len);
@@ -602,10 +602,13 @@ s_align SmithWaterman::alignStartPosBacktrace (
 
     if(bests_reverse.first.score != r.score1){
 		Debug(Debug::ERROR) << "r.word: " << r.word << "\n";
+		Debug(Debug::ERROR) << "query_length: " << query_length << "\n";
+		// Debug(Debug::ERROR) << "db_sequence: " << db_sequence << "\n";
         Debug(Debug::ERROR) << "bests_reverse.first.score: " << bests_reverse.first.score << "\n";
 		Debug(Debug::ERROR) << "r.score1: " << r.score1 << "\n";
 		Debug(Debug::ERROR) << "Score of forward/backward SW differ. This should not happen.\n";
         Debug(Debug::ERROR) << "Start: Q: " << (r.qEndPos1 - bests_reverse.first.read) << ", T: " << bests_reverse.first.ref << ". End: Q: " << r.qEndPos1 << ", T " << r.dbEndPos1 << "\n";
+		return r; // gyuri temporary fix
 		//  if qry is not a profile, just exit
         if (!(type == PROFILE_SEQ)) {
             EXIT(EXIT_FAILURE);

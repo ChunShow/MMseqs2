@@ -217,7 +217,6 @@ void ClusteringAlgorithms::setCover(unsigned int **elementLookupTable, unsigned 
                                     unsigned int *assignedcluster, short *bestscore, size_t *newElementOffsets) {
     for (int64_t cl_size = dbSize - 1; cl_size >= 0; cl_size--) {
         const unsigned int representative = sorted_clustersizes[cl_size];
-        std::cout << "representative: " << representative << " clsize: " << cl_size << std::endl;
         if (representative == UINT_MAX) {
             continue;
         }

@@ -577,15 +577,13 @@ size_t assignGroup(KmerPosition<T, IncludeAdjacentSeq> *hashSeqPair, size_t spli
     size_t countTableRepSeqs = 0;
     unsigned char repAdjacent[6];
     if (IncludeAdjacentSeq && splitFile != "COUNT_TABLE") {
-        adjacentRepSeqs = 4;
-        // adjacentRepSeqs = 3;
+        adjacentRepSeqs = 3;
         for (size_t i = 0; i < 6; i++) {
             repAdjacent[i] = hashSeqPair[0].getAdjacentSeq(i);
         }
     }
     if (useCountTable) { 
         countTableRepSeqs = 3;
-        // countTableRepSeqs = 3;
     }
     repSeqNum += adjacentRepSeqs + countTableRepSeqs;
     for (size_t elementIdx = 0; elementIdx < extraMemoryPos; elementIdx++) {
