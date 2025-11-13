@@ -181,14 +181,27 @@ int doalignblock(Parameters &par,
                     const char* targetSeq = tdbr->getData(targetId, thread_idx);
                     size_t targetLen = tdbr->getSeqLen(targetId);
                     target.mapSequence(targetId, targetKey, targetSeq, targetLen);
-
+                    // 0. run hamming alignment
+                    BlockAligner::UngappedAln_res hamming_aln = blockaligner.hammingDistance(&target, prefRes[element].diagonal); 
+                    double seqId = Util::computeSeqId(par.seqIdMode, static_cast<float>(hamming_aln.score), query.L, targetLen, hamming_aln.diagonalLen);
+                    bool hasAlnLen = (hamming_aln.alnLen >= par.alnLenThr);
+                    bool hasCov = Util::hasCoverage(par.covThr, par.covMode, hamming_aln.qcov, hamming_aln.tcov);
+                    bool hasSeqId = seqId >= (par.seqIdThr - std::numeric_limits<float>::epsilon());
+                    std::string backtrace = "";
+                    if (hasAlnLen && hasCov && hasSeqId) {
+                        Matcher::result_t result;
+                        result = Matcher::result_t(targetKey, hamming_aln.bitScore, hamming_aln.qcov, hamming_aln.tcov, seqId, hamming_aln.eval, hamming_aln.alnLen,
+                                                       hamming_aln.qStart, hamming_aln.qEnd, query.L, hamming_aln.tStart, hamming_aln.tEnd, target.L, backtrace);
+                        alnResults.emplace_back(result);
+                        continue;
+                    }
                     // 1. run ungapped alignment
                     BlockAligner::UngappedAln_res ungapped_aln = blockaligner.ungappedAlign(&target, prefRes[element].diagonal); 
                     //check ungapped criteria
                     bool hasEvalue = (ungapped_aln.eval <= par.evalThr);
-                    bool hasAlnLen = (ungapped_aln.alnLen >= par.alnLenThr);
-                    bool hasCov = Util::hasCoverage(par.covThr, par.covMode, ungapped_aln.qcov, ungapped_aln.tcov);
-                    double seqId = 0;
+                    hasAlnLen = (ungapped_aln.alnLen >= par.alnLenThr);
+                    hasCov = Util::hasCoverage(par.covThr, par.covMode, ungapped_aln.qcov, ungapped_aln.tcov);
+                    seqId = 0;
                     if (hasEvalue) {    
                         int idCnt = 0;
                         for (int q = ungapped_aln.qStart; q <= ungapped_aln.qEnd; q++) {
@@ -200,7 +213,7 @@ int doalignblock(Parameters &par,
                     }
                     char *end = Itoa::i32toa_sse2(ungapped_aln.alnLen, buffer);
                     size_t len = end - buffer;
-                    std::string backtrace = "";
+                    backtrace = "";
                     if (par.addBacktrace) {
                         backtrace=std::string(buffer, len - 1);
                         backtrace.push_back('M');
@@ -211,7 +224,7 @@ int doalignblock(Parameters &par,
                         ungapped_aln.tcov = 1.0f;
                         seqId = 1.0f;
                     }
-                    bool hasSeqId = seqId >= (par.seqIdThr - std::numeric_limits<float>::epsilon());
+                    hasSeqId = seqId >= (par.seqIdThr - std::numeric_limits<float>::epsilon());
                     
                     if (isIdentity || hasAlnLen && hasCov && hasSeqId && hasEvalue) {
                         Matcher::result_t result;

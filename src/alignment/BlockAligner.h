@@ -42,6 +42,9 @@ public:
         Sequence* target,
         const unsigned short diagonal
     );
+    BlockAligner::UngappedAln_res hammingDistance(
+        Sequence* target, const unsigned short diagonal);
+
 
 
     s_align align(
@@ -99,6 +102,7 @@ public:
         Cigar* cigar, int32_t x_drop
     );
 
+   
 private:
     size_t maxSequenceLength;    
 // holds values of the current active query

@@ -241,6 +241,45 @@ BlockAligner::UngappedAln_res align_local_profile(
 }
 
 
+BlockAligner::UngappedAln_res BlockAligner::hammingDistance(
+    Sequence* currentTarget, const unsigned short diagonal)
+{
+    const char* targetSeq = currentTarget->getSeqData();
+    DistanceCalculator::LocalAlignment alignment = DistanceCalculator::computeUngappedAlignment(
+                                                        querySeq, queryLength, currentTarget->getSeqData(), currentTarget->L,
+                                                        diagonal, fastMatrix->matrix, Parameters::RESCORE_MODE_HAMMING
+                                                    );
+    unsigned int distanceToDiagonal = alignment.distToDiagonal;
+    int diagonalLen = alignment.diagonalLen;
+    int ungappedDiagonal = alignment.diagonal;
+    int distance = alignment.score;
+
+    double evalue = 0.0;
+    int bitScore = 0;
+    int alnLen = 0;
+    float qCov = static_cast<float>(diagonalLen) / static_cast<float>(currentQuery->L);
+    float tCov = static_cast<float>(diagonalLen) / static_cast<float>(currentTarget->L);
+
+    int idCnt = (static_cast<float>(distance));
+    alnLen = diagonalLen;
+
+    
+    return UngappedAln_res(
+        bitScore,
+        qCov,
+        tCov,
+        evalue, 
+        alnLen,
+        0,
+        0,
+        0,
+        0,
+        alignment.diagonalLen,
+        alignment.score,
+        alignment.diagonal
+    );
+}
+
 BlockAligner::UngappedAln_res BlockAligner::ungappedAlign(
     Sequence* target, const unsigned short diagonal)
 {
