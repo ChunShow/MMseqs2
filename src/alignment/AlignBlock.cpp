@@ -181,12 +181,18 @@ int doalignblock(Parameters &par,
                     const char* targetSeq = tdbr->getData(targetId, thread_idx);
                     size_t targetLen = tdbr->getSeqLen(targetId);
                     target.mapSequence(targetId, targetKey, targetSeq, targetLen);
+                    // double seqId = 0.0;
+                    // bool hasAlnLen = false;
+                    // bool hasCov = false;
+                    // bool hasSeqId = false;
                     // 0. run hamming alignment
                     BlockAligner::UngappedAln_res hamming_aln = blockaligner.hammingDistance(&target, prefRes[element].diagonal); 
                     double seqId = Util::computeSeqId(par.seqIdMode, static_cast<float>(hamming_aln.score), query.L, targetLen, hamming_aln.diagonalLen);
                     bool hasAlnLen = (hamming_aln.alnLen >= par.alnLenThr);
-                    bool hasCov = Util::hasCoverage(par.covThr, par.covMode, hamming_aln.qcov, hamming_aln.tcov);
-                    bool hasSeqId = seqId >= (par.seqIdThr - std::numeric_limits<float>::epsilon());
+                    float hammingCovThr = std::max(0.7f, par.covThr);
+                    float hammingSeqIdThr = std::max(0.7f, par.seqIdThr);
+                    bool hasCov = Util::hasCoverage(hammingCovThr, par.covMode, hamming_aln.qcov, hamming_aln.tcov);
+                    bool hasSeqId = seqId >= (hammingSeqIdThr - std::numeric_limits<float>::epsilon());
                     std::string backtrace = "";
                     if (hasAlnLen && hasCov && hasSeqId) {
                         Matcher::result_t result;
@@ -255,51 +261,67 @@ int doalignblock(Parameters &par,
                         continue; // temporary gyuri
                     }
 
-                    bool foundMatch = false;
+                    // bool foundMatch = false;
 
-                    for (int offset = 0; offset < alnLen; ++offset) {
-                        // mid - offset (left)
-                        int j_left = mid - offset;
-                        if (j_left >= 0) {
-                            int qpos = qStartPos + j_left;
-                            int dbpos = tStartPos + j_left;
-                            if (querySeq[qpos] == targetSeq[dbpos]) {
-                                new_qStartPos = qpos;
-                                new_tStartPos = dbpos;
-                                foundMatch = true;
-                                break;
-                            }
-                        }
+                    // for (int offset = 0; offset < alnLen; ++offset) {
+                    //     // mid - offset (left)
+                    //     int j_left = mid - offset;
+                    //     if (j_left >= 0) {
+                    //         int qpos = qStartPos + j_left;
+                    //         int dbpos = tStartPos + j_left;
+                    //         if (querySeq[qpos] == targetSeq[dbpos]) {
+                    //             new_qStartPos = qpos;
+                    //             new_tStartPos = dbpos;
+                    //             foundMatch = true;
+                    //             break;
+                    //         }
+                    //     }
 
-                        // mid + offset (right)
-                        int j_right = mid + offset;
-                        if (j_right < alnLen) {
-                            int qpos = qStartPos + j_right;
-                            int dbpos = tStartPos + j_right;
-                            if (querySeq[qpos] == targetSeq[dbpos]) {
-                                new_qStartPos = qpos;
-                                new_tStartPos = dbpos;
-                                foundMatch = true;
-                                break;
-                            }
-                        }
-                    }
-                    // for (int j=0; j < alnLen; ++j){
-                    //     int qpos = qStartPos + j;
-                    //     int dbpos = tStartPos + j;
-                    //     if (querySeq[qpos] == targetSeq[dbpos]) {
-                    //         new_qStartPos = qpos;
-                    //         new_tStartPos = dbpos;
-                    //         foundMatch = true;
-                    //         break;
+                    //     // mid + offset (right)
+                    //     int j_right = mid + offset;
+                    //     if (j_right < alnLen) {
+                    //         int qpos = qStartPos + j_right;
+                    //         int dbpos = tStartPos + j_right;
+                    //         if (querySeq[qpos] == targetSeq[dbpos]) {
+                    //             new_qStartPos = qpos;
+                    //             new_tStartPos = dbpos;
+                    //             foundMatch = true;
+                    //             break;
+                    //         }
                     //     }
                     // }
-            
+
+                    bool foundThreeMatch = false;
                     
-                    if(foundMatch) {
+                    // //////////
+                    if (alnLen < 3){
+                        continue;
+                    }
+    
+                    for (int blockIdx = 0; blockIdx <= alnLen - 3; ++blockIdx) {
+                        int qpos = qStartPos + blockIdx;
+                        int dbpos = tStartPos+ blockIdx;
+    
+                        // std::cout << "qPos: " << qpos << " dbpos: " << dbpos << std::endl;
+    
+                        if (querySeq[qpos] == targetSeq[dbpos] &&
+                            querySeq[qpos + 1] == targetSeq[dbpos + 1] &&
+                            querySeq[qpos + 2] == targetSeq[dbpos + 2]) {
+                            
+                            // Found 3 consecutive matches
+                            new_qStartPos = qpos + 1;  // 3개 매치 중 가운데 위치
+                            new_tStartPos = dbpos + 1;
+                            foundThreeMatch = true;
+                            break;
+                        }
+                    }
+            
+                    if (foundThreeMatch){
+                    // if(foundMatch) {
                         std::string backtrace;
-                        s_align alignment = blockaligner.align(&target, new_qStartPos, new_tStartPos, backtrace, x_drop, par.covThr, par.covMode);
-                        // s_align alignment = blockaligner.bandedalign(&target, new_qStartPos, new_tStartPos, backtrace, x_drop, par.covThr, par.covMode);
+                        // s_align alignment = blockaligner.align(&target, new_qStartPos, new_tStartPos, backtrace, x_drop, par.covThr, par.covMode);
+                        s_align alignment = blockaligner.bandedalign(&target, new_qStartPos, new_tStartPos, backtrace, x_drop, par.covThr, par.covMode);
+                        // std::cout << std::endl;
                         unsigned int alnLength = backtrace.size(); // Is it correct?
                         double seqId = Util::computeSeqId(par.seqIdMode, alignment.identicalAACnt, query.L, targetLen, alnLength);
                         Matcher::result_t res = Matcher::result_t(targetKey, alignment.score1, alignment.qCov, alignment.tCov, seqId, alignment.evalue, alnLength,

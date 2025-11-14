@@ -105,10 +105,10 @@ int linclust(int argc, const char **argv, const Command& command) {
     par.filterHits = false;
     float prevSeqId = par.seqIdThr;
     // hamming distance does not work well with seq. id < 0.5 since it does not have an e-value criteria
-    par.seqIdThr = std::max(0.5f, par.seqIdThr);
+    par.seqIdThr = std::max(0.7f, par.seqIdThr);
     // also coverage should not be under 0.5
     float prevCov = par.covThr;
-    par.covThr = std::max(0.5f, par.covThr);
+    par.covThr = std::max(0.7f, par.covThr);
     //temporary
     par.filterHits = true;
     cmd.addVariable("HAMMING_PAR", par.createParameterString(par.rescorediagonal).c_str());
