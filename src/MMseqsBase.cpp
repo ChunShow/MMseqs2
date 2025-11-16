@@ -670,6 +670,7 @@ std::vector<Command> baseCommands = {
                 "Martin Steinegger <martin.steinegger@snu.ac.kr>",
                 "<i:sequenceDB> <i:resultDB> <o:alignmentDB>",
                 CITATION_MMSEQS2, {{"sequenceDB", DbType::ACCESS_MODE_INPUT, DbType::NEED_DATA, &DbValidator::sequenceDb },
+                                                        {"prefDB", DbType::ACCESS_MODE_INPUT, DbType::NEED_DATA, &DbValidator::resultDb },
                                                            {"resultDB", DbType::ACCESS_MODE_INPUT, DbType::NEED_DATA, &DbValidator::resultDb },
                                                            {"alignmentDB", DbType::ACCESS_MODE_OUTPUT, DbType::NEED_DATA, &DbValidator::alignmentDb }}},
         {"alignblock",             alignblock,             &par.alignblock,             COMMAND_ALIGNMENT,

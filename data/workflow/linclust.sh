@@ -24,24 +24,17 @@ if notExists "${TMP_PATH}/pref.dbtype"; then
     $RUNNER "$MMSEQS" kmermatcher "$INPUT" "${TMP_PATH}/pref" ${KMERMATCHER_PAR} \
         || fail "kmermatcher died"
 fi
-
-# if notExists "${TMP_PATH}/aln_ungap.dbtype"; then
-#     # shellcheck disable=SC2086
-#     $RUNNER "$MMSEQS" rescorediagonal "$INPUT" "$INPUT" "${TMP_PATH}/pref" "${TMP_PATH}/aln_ungap" ${UNGAPPED_ALN_PAR} \
-#         || fail "Rescore with ungapped substitution step died"
-# fi
-# RESULTDB="${TMP_PATH}/aln_ungap"
 RESULTDB="${TMP_PATH}/pref"
 
-# 5. Clustering using greedy set cover.
-if notExists "${TMP_PATH}/clust.dbtype"; then
+# 2. Ungapped and gapped alignment(w/ banded-block aligner)
+if notExists "${TMP_PATH}/aln.dbtype"; then
     # shellcheck disable=SC2086
     $RUNNER "$MMSEQS" alignblock "$INPUT" "$INPUT" "$RESULTDB" "${TMP_PATH}/aln" ${ALIGNBLOCK_PAR} \
-        || fail "AlignBlock step died"
+        || fail "alignblock step died"
 fi
-
 RESULTDB="${TMP_PATH}/aln"
-# 5. Clustering using greedy set cover.
+
+# 3. Clustering 
 if notExists "${TMP_PATH}/clust.dbtype"; then
     # shellcheck disable=SC2086
     "$MMSEQS" clust "$INPUT" "$RESULTDB" "$2" ${CLUSTER_PAR} \
@@ -50,27 +43,8 @@ fi
 
 if [ -n "$REMOVE_TMP" ]; then
     # shellcheck disable=SC2086
-    "$MMSEQS" rmdb "${TMP_PATH}/pref_filter1" ${VERBOSITY}
-    # shellcheck disable=SC2086
     "$MMSEQS" rmdb "${TMP_PATH}/pref" ${VERBOSITY}
     # shellcheck disable=SC2086
-    "$MMSEQS" rmdb "${TMP_PATH}/pref_rescore1" ${VERBOSITY}
-    # shellcheck disable=SC2086
-    "$MMSEQS" rmdb "${TMP_PATH}/pre_clust" ${VERBOSITY}
-    # shellcheck disable=SC2086
-    "$MMSEQS" rmdb "${TMP_PATH}/input_step_redundancy" ${VERBOSITY}
-    # shellcheck disable=SC2086
-    "$MMSEQS" rmdb "${TMP_PATH}/input_step_redundancy_h" ${VERBOSITY}
-    rm -f "${TMP_PATH}/order_redundancy"
-    # shellcheck disable=SC2086
-    "$MMSEQS" rmdb "${TMP_PATH}/pref_filter2" ${VERBOSITY}
-    if [ -n "$FILTER" ]; then
-        # shellcheck disable=SC2086
-        "$MMSEQS" rmdb "${TMP_PATH}/pref_rescore2" ${VERBOSITY}
-    fi
-    # shellcheck disable=SC2086
     "$MMSEQS" rmdb "${TMP_PATH}/aln" ${VERBOSITY}
-    # shellcheck disable=SC2086
-    "$MMSEQS" rmdb "${TMP_PATH}/clust" ${VERBOSITY}
     rm -f "${TMP_PATH}/linclust.sh"
 fi

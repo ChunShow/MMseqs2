@@ -88,19 +88,16 @@ int doalignblock(Parameters &par,
     DBReader<unsigned int> * tdbr = NULL;
     bool touch = (par.preloadMode != Parameters::PRELOAD_MODE_MMAP);
     IndexReader * tDbrIdx = new IndexReader(par.db2, par.threads, IndexReader::SEQUENCES,   (touch) ? (IndexReader::PRELOAD_INDEX | IndexReader::PRELOAD_DATA) : 0 );
-    int querySeqType = 0;
     tdbr = tDbrIdx->sequenceReader;
     int targetSeqType = tDbrIdx->getDbtype();
     bool sameQTDB = (par.db2.compare(par.db1) == 0);
     if (sameQTDB == true) {
         qDbrIdx = tDbrIdx;
         qdbr = tdbr;
-        querySeqType = targetSeqType;
     } else {
         // open the sequence, prefiltering and output databases
         qDbrIdx = new IndexReader(par.db1, par.threads,  IndexReader::SEQUENCES, (touch) ? IndexReader::PRELOAD_INDEX : 0);
         qdbr = qDbrIdx->sequenceReader;
-        querySeqType = qdbr->getDbtype();
     }
 
     if(resultDbr.isSortedByOffset() && qdbr->isSortedByOffset()){
@@ -110,10 +107,6 @@ int doalignblock(Parameters &par,
     BaseMatrix *subMat;
     subMat = new SubstitutionMatrix(par.scoringMatrixFile.values.aminoacid().c_str(), 2.0, 0.0);
     SubstitutionMatrix::FastMatrix fastMatrix = SubstitutionMatrix::createAsciiSubMat(*subMat);
-
-    int gapOpen = par.gapOpen.values.aminoacid();
-    int gapExtend = par.gapExtend.values.aminoacid();
-    unsigned int swMode = Alignment::initSWMode(par.alignmentMode, par.covThr, par.seqIdThr);
 
     float scorePerColThr = 0.0;
     std::string libraryString = (par.covMode == Parameters::COV_MODE_BIDIRECTIONAL)
@@ -181,26 +174,32 @@ int doalignblock(Parameters &par,
                     const char* targetSeq = tdbr->getData(targetId, thread_idx);
                     size_t targetLen = tdbr->getSeqLen(targetId);
                     target.mapSequence(targetId, targetKey, targetSeq, targetLen);
-                    // double seqId = 0.0;
-                    // bool hasAlnLen = false;
-                    // bool hasCov = false;
-                    // bool hasSeqId = false;
-                    // 0. run hamming alignment
-                    BlockAligner::UngappedAln_res hamming_aln = blockaligner.hammingDistance(&target, prefRes[element].diagonal); 
-                    double seqId = Util::computeSeqId(par.seqIdMode, static_cast<float>(hamming_aln.score), query.L, targetLen, hamming_aln.diagonalLen);
-                    bool hasAlnLen = (hamming_aln.alnLen >= par.alnLenThr);
-                    float hammingCovThr = std::max(0.7f, par.covThr);
-                    float hammingSeqIdThr = std::max(0.7f, par.seqIdThr);
-                    bool hasCov = Util::hasCoverage(hammingCovThr, par.covMode, hamming_aln.qcov, hamming_aln.tcov);
-                    bool hasSeqId = seqId >= (hammingSeqIdThr - std::numeric_limits<float>::epsilon());
+                    
+                    double seqId = 0.0;
+                    bool hasAlnLen = false;
+                    bool hasCov = false;
+                    bool hasSeqId = false;
                     std::string backtrace = "";
-                    if (hasAlnLen && hasCov && hasSeqId) {
-                        Matcher::result_t result;
-                        result = Matcher::result_t(targetKey, hamming_aln.bitScore, hamming_aln.qcov, hamming_aln.tcov, seqId, hamming_aln.eval, hamming_aln.alnLen,
-                                                       hamming_aln.qStart, hamming_aln.qEnd, query.L, hamming_aln.tStart, hamming_aln.tEnd, target.L, backtrace);
-                        alnResults.emplace_back(result);
-                        continue;
+                    // 0. run hamming alignment
+                    if (par.skipHamming == false){
+                        BlockAligner::UngappedAln_res hamming_aln = blockaligner.hammingDistance(&target, prefRes[element].diagonal); 
+                        double seqId = Util::computeSeqId(par.seqIdMode, static_cast<float>(hamming_aln.score), query.L, targetLen, hamming_aln.diagonalLen);
+                        bool hasAlnLen = (hamming_aln.alnLen >= par.alnLenThr);
+                        float hammingCovThr = std::max(0.5f, par.covThr);
+                        float hammingSeqIdThr = std::max(0.5f, par.seqIdThr);
+                        bool hasCov = Util::hasCoverage(hammingCovThr, par.covMode, hamming_aln.qcov, hamming_aln.tcov);
+                        bool hasSeqId = seqId >= (hammingSeqIdThr - std::numeric_limits<float>::epsilon());
+                        if (hasAlnLen && hasCov && hasSeqId) {
+                            Matcher::result_t result;
+                            result = Matcher::result_t(targetKey, hamming_aln.bitScore, hamming_aln.qcov, hamming_aln.tcov, seqId, hamming_aln.eval, hamming_aln.alnLen,
+                                                        hamming_aln.qStart, hamming_aln.qEnd, query.L, hamming_aln.tStart, hamming_aln.tEnd, target.L, backtrace);
+                            alnResults.emplace_back(result);
+                            continue;
+                        }
                     }
+                    
+                    
+                    
                     // 1. run ungapped alignment
                     BlockAligner::UngappedAln_res ungapped_aln = blockaligner.ungappedAlign(&target, prefRes[element].diagonal); 
                     //check ungapped criteria
@@ -232,7 +231,7 @@ int doalignblock(Parameters &par,
                     }
                     hasSeqId = seqId >= (par.seqIdThr - std::numeric_limits<float>::epsilon());
                     
-                    if (isIdentity || hasAlnLen && hasCov && hasSeqId && hasEvalue) {
+                    if (isIdentity || (hasAlnLen && hasCov && hasSeqId && hasEvalue)) {
                         Matcher::result_t result;
                         result = Matcher::result_t(targetKey, ungapped_aln.bitScore, ungapped_aln.qcov, ungapped_aln.tcov, seqId, ungapped_aln.eval, ungapped_aln.alnLen,
                                                        ungapped_aln.qStart, ungapped_aln.qEnd, query.L, ungapped_aln.tStart, ungapped_aln.tEnd, target.L, backtrace);
@@ -250,53 +249,17 @@ int doalignblock(Parameters &par,
                     // 2-2. Run gapped alignment
                     // find seed point from mid
                     int alnLen = ungapped_aln.alnLen;
-                    int mid = alnLen / 2;
 
                     int qStartPos = ungapped_aln.qStart;
                     int tStartPos = ungapped_aln.tStart;
 
                     int new_qStartPos = qStartPos;
                     int new_tStartPos = tStartPos;
-                    if (qStartPos == -1 || tStartPos == -1) {
-                        continue; // temporary gyuri
-                    }
-
-                    // bool foundMatch = false;
-
-                    // for (int offset = 0; offset < alnLen; ++offset) {
-                    //     // mid - offset (left)
-                    //     int j_left = mid - offset;
-                    //     if (j_left >= 0) {
-                    //         int qpos = qStartPos + j_left;
-                    //         int dbpos = tStartPos + j_left;
-                    //         if (querySeq[qpos] == targetSeq[dbpos]) {
-                    //             new_qStartPos = qpos;
-                    //             new_tStartPos = dbpos;
-                    //             foundMatch = true;
-                    //             break;
-                    //         }
-                    //     }
-
-                    //     // mid + offset (right)
-                    //     int j_right = mid + offset;
-                    //     if (j_right < alnLen) {
-                    //         int qpos = qStartPos + j_right;
-                    //         int dbpos = tStartPos + j_right;
-                    //         if (querySeq[qpos] == targetSeq[dbpos]) {
-                    //             new_qStartPos = qpos;
-                    //             new_tStartPos = dbpos;
-                    //             foundMatch = true;
-                    //             break;
-                    //         }
-                    //     }
-                    // }
-
-                    bool foundThreeMatch = false;
-                    
-                    // //////////
-                    if (alnLen < 3){
+                    if (qStartPos == -1 || tStartPos == -1 || alnLen < 3) {
                         continue;
                     }
+
+                    bool foundConsecutiveMatchSeed = false;
     
                     for (int blockIdx = 0; blockIdx <= alnLen - 3; ++blockIdx) {
                         int qpos = qStartPos + blockIdx;
@@ -311,18 +274,18 @@ int doalignblock(Parameters &par,
                             // Found 3 consecutive matches
                             new_qStartPos = qpos + 1;  // 3개 매치 중 가운데 위치
                             new_tStartPos = dbpos + 1;
-                            foundThreeMatch = true;
+                            foundConsecutiveMatchSeed = true;
                             break;
                         }
                     }
             
-                    if (foundThreeMatch){
-                    // if(foundMatch) {
+                    if (foundConsecutiveMatchSeed){
                         std::string backtrace;
+                        // Option1. block alignment (forward + backward)
                         // s_align alignment = blockaligner.align(&target, new_qStartPos, new_tStartPos, backtrace, x_drop, par.covThr, par.covMode);
+                        // Option2. banded alignment (bidirectional)
                         s_align alignment = blockaligner.bandedalign(&target, new_qStartPos, new_tStartPos, backtrace, x_drop, par.covThr, par.covMode);
-                        // std::cout << std::endl;
-                        unsigned int alnLength = backtrace.size(); // Is it correct?
+                        unsigned int alnLength = backtrace.size();
                         double seqId = Util::computeSeqId(par.seqIdMode, alignment.identicalAACnt, query.L, targetLen, alnLength);
                         Matcher::result_t res = Matcher::result_t(targetKey, alignment.score1, alignment.qCov, alignment.tCov, seqId, alignment.evalue, alnLength,
                                                     alignment.qStartPos1, alignment.qEndPos1, query.L, alignment.dbStartPos1, alignment.dbEndPos1, targetLen, backtrace);
@@ -337,7 +300,7 @@ int doalignblock(Parameters &par,
                 }
 
                 for (size_t i = 0; i < alnResults.size(); ++i) {
-                    size_t len = Matcher::resultToBuffer(buffer, alnResults[i], false, false); // add backtrace false   // gyuri
+                    size_t len = Matcher::resultToBuffer(buffer, alnResults[i], par.addBacktrace); 
                     resultBuffer.append(buffer, len);
                 }
 
@@ -377,6 +340,7 @@ int alignblock(int argc, const char **argv, const Command &command) {
 
     int status = doalignblock(par, resultWriter, resultDbr, 0, resultDbr.getSize());
     Debug(Debug::INFO) << "Time for run alignblock: " << timer.lap() << " sec\n";
+    // resultWriter.close(true);
     resultWriter.close();
     resultDbr.close();
     return status;

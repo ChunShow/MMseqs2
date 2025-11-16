@@ -468,7 +468,7 @@ public:
     int    gapPseudoCount;               // for calculation of position-specific gap opening penalties
 #endif
     int    zdrop;                        // zdrop
-
+    bool   skipHamming;
     // workflow
     std::string runner;
     bool reuseLatest;
@@ -851,6 +851,9 @@ public:
     PARAMETER(PARAM_GAP_PSEUDOCOUNT)
 #endif
     PARAMETER(PARAM_ZDROP)
+
+    //alginblock
+    PARAMETER(PARAM_SKIP_HAMMING)
 
     // clustering
     PARAMETER(PARAM_CLUSTER_MODE)

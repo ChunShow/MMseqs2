@@ -91,6 +91,8 @@ Parameters::Parameters():
         PARAM_GAP_PSEUDOCOUNT(PARAM_GAP_PSEUDOCOUNT_ID, "--gap-pc", "Gap pseudo count", "Pseudo count for calculating position-specific gap opening penalties", typeid(int), &gapPseudoCount, "^[0-9]+$", MMseqsParameter::COMMAND_ALIGN|MMseqsParameter::COMMAND_EXPERT),
 #endif
         PARAM_ZDROP(PARAM_ZDROP_ID, "--zdrop", "Zdrop", "Maximal allowed difference between score values before alignment is truncated  (nucleotide alignment only)", typeid(int), (void*) &zdrop, "^[0-9]{1}[0-9]*$", MMseqsParameter::COMMAND_ALIGN | MMseqsParameter::COMMAND_EXPERT),
+        // alignblock
+        PARAM_SKIP_HAMMING(PARAM_SKIP_HAMMING_ID, "-skip-hamming", "Disable hamming distance alignment", "Skip hamming distance based ungapped alignment in alignblock", typeid(bool), (void *) &skipHamming, "", MMseqsParameter::COMMAND_EXPERT),
         // clustering
         PARAM_CLUSTER_MODE(PARAM_CLUSTER_MODE_ID, "--cluster-mode", "Cluster mode", "0: Set-Cover (greedy)\n1: Connected component (BLASTclust)\n2,3: Greedy clustering by sequence length (CDHIT)", typeid(int), (void *) &clusteringMode, "[0-3]{1}$", MMseqsParameter::COMMAND_CLUST),
         PARAM_CLUSTER_STEPS(PARAM_CLUSTER_STEPS_ID, "--cluster-steps", "Cascaded clustering steps", "Cascaded clustering steps from 1 to -s", typeid(int), (void *) &clusterSteps, "^[1-9]{1}$", MMseqsParameter::COMMAND_CLUST | MMseqsParameter::COMMAND_EXPERT),
@@ -445,6 +447,7 @@ Parameters::Parameters():
     alignblock.push_back(&PARAM_INCLUDE_IDENTITY);
     alignblock.push_back(&PARAM_SORT_RESULTS);
     alignblock.push_back(&PARAM_PRELOAD_MODE);
+    alignblock.push_back(&PARAM_SKIP_HAMMING);
     alignblock.push_back(&PARAM_THREADS);
     alignblock.push_back(&PARAM_COMPRESSED);
     alignblock.push_back(&PARAM_V);
@@ -2498,6 +2501,7 @@ void Parameters::setDefaults() {
     gapPseudoCount = 10;
 #endif
     zdrop = 40;
+    skipHamming = true;
     addBacktrace = false;
     realign = false;
     clusteringMode = SET_COVER;

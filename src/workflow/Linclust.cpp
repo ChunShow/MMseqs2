@@ -15,7 +15,8 @@ void setLinclustWorkflowDefaults(Parameters *p) {
     p->maskMode = 0;
     p->evalThr = 0.001;
     p->seqIdThr = 0.9;
-    p->alignmentMode = Parameters::ALIGNMENT_MODE_SCORE_COV;
+    p->alignmentMode = Parameters::ALIGNMENT_MODE_SCORE_COV_SEQID; // use alignment mode 3 in linclust2
+    p->skipHamming = true;
 }
 
 int linclust(int argc, const char **argv, const Command& command) {
@@ -45,9 +46,6 @@ int linclust(int argc, const char **argv, const Command& command) {
     cmd.addVariable("REMOVE_TMP", par.removeTmpFiles ? "TRUE" : NULL);
     cmd.addVariable("RUNNER", par.runner.c_str());
 
-    // save some values to restore them later
-    MultiParam<NuclAA<int>>alphabetSize = par.alphabetSize;
-    size_t kmerSize = par.kmerSize;
     // # 1. Finding exact $k$-mer matches.
     bool kmerSizeWasSet = false;
     bool alphabetSizeWasSet = false;
@@ -90,53 +88,12 @@ int linclust(int argc, const char **argv, const Command& command) {
         EXIT(EXIT_FAILURE);
     }
 
-    cmd.addVariable("ALIGN_MODULE", isUngappedMode ? "rescorediagonal" : "align");
-    // filter by diagonal in case of AA (do not filter for nucl, profiles, ...)
-    cmd.addVariable("FILTER", Parameters::isEqualDbtype(dbType, Parameters::DBTYPE_AMINO_ACIDS) ? "1" : NULL);
+    
     cmd.addVariable("KMERMATCHER_PAR", par.createParameterString(par.kmermatcher).c_str());
     cmd.addVariable("VERBOSITY", par.createParameterString(par.onlyverbosity).c_str());
-    cmd.addVariable("VERBOSITYANDCOMPRESS", par.createParameterString(par.threadsandcompression).c_str());
-
-    par.alphabetSize = alphabetSize;
-    par.kmerSize = kmerSize;
-
-    // # 2. Hamming distance pre-clustering
-    par.rescoreMode = Parameters::RESCORE_MODE_HAMMING;
-    par.filterHits = false;
-    float prevSeqId = par.seqIdThr;
-    // hamming distance does not work well with seq. id < 0.5 since it does not have an e-value criteria
-    par.seqIdThr = std::max(0.7f, par.seqIdThr);
-    // also coverage should not be under 0.5
-    float prevCov = par.covThr;
-    par.covThr = std::max(0.7f, par.covThr);
-    //temporary
-    par.filterHits = true;
-    cmd.addVariable("HAMMING_PAR", par.createParameterString(par.rescorediagonal).c_str());
-    // set it back to old value
-    par.covThr = prevCov;
-    par.seqIdThr = prevSeqId;
-    par.rescoreMode = Parameters::RESCORE_MODE_SUBSTITUTION;
-
-    // # 3. Ungapped alignment filtering
-    par.filterHits = true; // gyuri changed
-    cmd.addVariable("UNGAPPED_ALN_PAR", par.createParameterString(par.rescorediagonal).c_str());
-    par.filterHits = false;
     cmd.addVariable("ALIGNBLOCK_PAR", par.createParameterString(par.alignblock).c_str());
-
-    // # 4. Local gapped sequence alignment.
-    if (isUngappedMode) {
-        const int originalRescoreMode = par.rescoreMode;
-        par.rescoreMode = Parameters::RESCORE_MODE_ALIGNMENT;
-        cmd.addVariable("ALIGNMENT_PAR", par.createParameterString(par.rescorediagonal).c_str());
-        par.rescoreMode = originalRescoreMode;
-    } else {
-        cmd.addVariable("ALIGNMENT_PAR", par.createParameterString(par.align).c_str());
-    }
-    cmd.addVariable("ALIGNBLOCK_PAR", par.createParameterString(par.alignblock).c_str());
-    // # 5. Clustering using greedy set cover.
     cmd.addVariable("CLUSTER_PAR", par.createParameterString(par.clust).c_str());
     cmd.addVariable("MERGECLU_PAR", par.createParameterString(par.threadsandcompression).c_str());
-
     std::string program = tmpDir + "/linclust.sh";
     FileUtil::writeFile(program, linclust_sh, linclust_sh_len);
     cmd.execProgram(program.c_str(), par.filenames);
