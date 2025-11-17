@@ -208,9 +208,6 @@ void ClusteringAlgorithms::decreaseClustersize(unsigned int clusterid){
     clusterid_to_arrayposition[clusterid]=newposition;
     borders_of_set[clustersizes[clusterid]]++;
     clustersizes[clusterid]--;
-    if (clustersizes[clusterid] < 0) {
-        Debug(Debug::ERROR) << "error: clustersizes[" << clusterid << "] < 0\n";
-    }
 }
 
 void ClusteringAlgorithms::setCover(unsigned int **elementLookupTable, unsigned short ** elementScoreLookupTable,

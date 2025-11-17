@@ -30,8 +30,6 @@ BlockAligner::BlockAligner(
     queryRevNumSeq = new int8_t[maxSequenceLength];
     memset(queryRevNumSeq, 0, maxSequenceLength * sizeof(int8_t));
     
-    
-    
     if (Parameters::isEqualDbtype(dbtype, Parameters::DBTYPE_HMM_PROFILE) == false) {
         querySeqType = Parameters::DBTYPE_AMINO_ACIDS;
         target = block_new_padded_aa(maxSequenceLength, range.max);
@@ -45,8 +43,10 @@ BlockAligner::BlockAligner(
 			}
 		}
     } else {
-        querySeqType = Parameters::DBTYPE_HMM_PROFILE;
-        bProfile = block_new_aaprofile(maxSequenceLength, range.max, gaps.extend);
+        Debug(Debug::ERROR) << "blockaligner for profile is not supported yet. \n";
+        EXIT(EXIT_FAILURE);
+        // querySeqType = Parameters::DBTYPE_HMM_PROFILE;
+        // bProfile = block_new_aaprofile(maxSequenceLength, range.max, gaps.extend);
     }
     blockTrace = block_new_aa_trace_xdrop(maxSequenceLength, maxSequenceLength, range.max);
     blockNoTrace = block_new_aa_xdrop(maxSequenceLength, maxSequenceLength, range.max);
@@ -70,9 +70,10 @@ BlockAligner::~BlockAligner() {
         block_free_padded_aa(target);
         block_free_pos_bias(targetBias);
         block_free_aamatrix(matrix);
-    } else {
-        block_free_aaprofile(bProfile);
     }
+    // } else {
+    //     block_free_aaprofile(bProfile);
+    // }
     delete[] queryCompBias;
     delete[] targetCompBias;
     delete[] tmpCompBias;
@@ -148,7 +149,7 @@ s_align BlockAligner::gappedLocalAlign(
     
     if (res.query_idx == SIZE_MAX || res.reference_idx == SIZE_MAX || !hasCov) {
         // Debug(Debug::ERROR) << "wrong end position: " << qEnd << "\t" << tEnd << "\n";
-        local_aln.score1 = -1.0f;
+        local_aln.score1 = 0.0f;
         local_aln.qCov = 0.0f;
         local_aln.tCov = 0.0f;
         local_aln.evalue = -1.0f; // this should avoid that the hit is added
@@ -188,81 +189,21 @@ s_align BlockAligner::gappedLocalAlign(
     return local_aln;
 }
 
-BlockAligner::UngappedAln_res align_local_profile(
-    BlockHandle blockTrace, BlockHandle blockNoTrace,
-    const char* q_str, const size_t qLen, PaddedBytes* a,
-    const char* t_str, const size_t tLen, AAProfile* bProfile,
-    Gaps gaps, BaseMatrix& subMat,
-    int qIdx, int tIdx,
-    Cigar* cigar, SizeRange range, int32_t x_drop
-) {
-    BlockAligner::UngappedAln_res res_aln;
-    AlignResult res;
-
-    // forwards alignment starting at (qIdx, tIdx)
-    block_set_bytes_padded_aa(a, (uint8_t*)(q_str + qIdx), qLen - qIdx, range.max);
-
-    // assign extra profile columns to 'U', which is unused
-    int aa = Sequence::PROFILE_READIN_SIZE;
-    uint8_t order[Sequence::PROFILE_READIN_SIZE];
-    memset(order, 'U', Sequence::PROFILE_READIN_SIZE);
-    memcpy(order, (uint8_t*)subMat.num2aa, Sequence::PROFILE_AA_SIZE);
-
-    block_clear_aaprofile(bProfile, tLen - tIdx, range.max);
-    // note: scores are divided by 4 by shifting right by 2
-    block_set_all_aaprofile(bProfile, order, aa, (int8_t*)(t_str + tIdx * aa), (tLen - tIdx) * aa, 0, 2);
-    block_set_all_gap_open_C_aaprofile(bProfile, gaps.open);
-    block_set_all_gap_close_C_aaprofile(bProfile, 0);
-    block_set_all_gap_open_R_aaprofile(bProfile, gaps.open);
-
-    block_align_profile_aa_xdrop(blockNoTrace, a, bProfile, range, x_drop);
-    res = block_res_aa_xdrop(blockNoTrace);
-
-    res_aln.qEnd = qIdx + res.query_idx;
-    res_aln.tEnd = tIdx + res.reference_idx;
-
-    // reversed alignment starting at the max score location from forwards alignment
-    block_set_bytes_rev_padded_aa(a, (uint8_t*)q_str, res_aln.qEnd, range.max);
-
-    block_clear_aaprofile(bProfile, res_aln.tEnd, range.max);
-    block_set_all_rev_aaprofile(bProfile, order, aa, (int8_t*)t_str, res_aln.tEnd * aa, 0, 2);
-    block_set_all_gap_open_C_aaprofile(bProfile, gaps.open);
-    block_set_all_gap_close_C_aaprofile(bProfile, 0);
-    block_set_all_gap_open_R_aaprofile(bProfile, gaps.open);
-
-    block_align_profile_aa_trace_xdrop(blockTrace, a, bProfile, range, x_drop);
-    res = block_res_aa_trace_xdrop(blockTrace);
-    block_cigar_aa_trace_xdrop(blockTrace, res.query_idx, res.reference_idx, cigar);
-
-    res_aln.qStart = res_aln.qEnd - res.query_idx;
-    res_aln.tStart = res_aln.tEnd - res.reference_idx;
-    res_aln.score = res.score;
-    return res_aln;
-}
-
-
 BlockAligner::UngappedAln_res BlockAligner::hammingDistance(
     Sequence* currentTarget, const unsigned short diagonal)
 {
-    const char* targetSeq = currentTarget->getSeqData();
     DistanceCalculator::LocalAlignment alignment = DistanceCalculator::computeUngappedAlignment(
                                                         querySeq, queryLength, currentTarget->getSeqData(), currentTarget->L,
                                                         diagonal, fastMatrix->matrix, Parameters::RESCORE_MODE_HAMMING
                                                     );
-    unsigned int distanceToDiagonal = alignment.distToDiagonal;
     int diagonalLen = alignment.diagonalLen;
-    int ungappedDiagonal = alignment.diagonal;
-    int distance = alignment.score;
-
+    int alnLen = diagonalLen;
     double evalue = 0.0;
     int bitScore = 0;
-    int alnLen = 0;
     float qCov = static_cast<float>(diagonalLen) / static_cast<float>(currentQuery->L);
     float tCov = static_cast<float>(diagonalLen) / static_cast<float>(currentTarget->L);
 
-    int idCnt = (static_cast<float>(distance));
-    alnLen = diagonalLen;
-
+    
     
     return UngappedAln_res(
         bitScore,
@@ -424,7 +365,7 @@ s_align BlockAligner::gappedLocalAlignForward(
     
     if (res.query_idx == SIZE_MAX || res.reference_idx == SIZE_MAX) {
         // Debug(Debug::ERROR) << "wrong end position: " << qEnd << "\t" << tEnd << "\n";
-        local_aln.score1 = -1.0f;
+        local_aln.score1 = 0.0f;
         local_aln.qCov = 0.0f;
         local_aln.tCov = 0.0f;
         local_aln.evalue = -1.0f; // this should avoid that the hit is added
@@ -473,7 +414,7 @@ s_align BlockAligner::gappedLocalAlignBackward(
     block_cigar_aa_trace_xdrop(blockTrace, res.query_idx, res.reference_idx, cigar);
     if (res.query_idx == SIZE_MAX || res.reference_idx == SIZE_MAX) {
         // Debug(Debug::ERROR) << "wrong end position: " << qEnd << "\t" << tEnd << "\n";
-        local_aln.score1 = -1.0f;
+        local_aln.score1 = 0.0f;
         local_aln.qCov = 0.0f;
         local_aln.tCov = 0.0f;
         local_aln.evalue = -1.0f; // this should avoid that the hit is added
@@ -673,7 +614,7 @@ BlockAligner::bandedalign(
     float tmptcov = SmithWaterman::computeCov(0, local_aln_Forward.dbEndPos1, currentTarget->L);
     bool hasCov = Util::hasCoverage(covThr, covMode, tmpqcov, tmptcov);
     if (!hasCov) {
-        local_aln.score1 = -1.0f;
+        local_aln.score1 = 0.0f;
         local_aln.qCov = 0.0f;
         local_aln.tCov = 0.0f;
         local_aln.evalue = -1.0f; // this should avoid that the hit is added
@@ -695,14 +636,14 @@ BlockAligner::bandedalign(
     }
 
     if (backtrace_backward.empty() == false && backtrace_backward.back() != 'M') {
-        local_aln.score1 = -1.0f;
+        local_aln.score1 = 0.0f;
         local_aln.qCov = 0.0f;
         local_aln.tCov = 0.0f;
         local_aln.evalue = -1.0f; // this should avoid that the hit is added
         return local_aln;
     }
     if (backtrace_forward.empty() == false && backtrace_forward.front() != 'M') {
-        local_aln.score1 = -1.0f;
+        local_aln.score1 = 0.0f;
         local_aln.qCov = 0.0f;
         local_aln.tCov = 0.0f;
         local_aln.evalue = -1.0f; // this should avoid that the hit is added

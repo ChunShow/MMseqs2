@@ -112,26 +112,28 @@ private:
     PaddedBytes* target;
     PosBias* queryBias;
     PosBias* targetBias;
-    AAProfile* bProfile;
     AAMatrix* matrix;
     BlockHandle blockTrace;
     BlockHandle blockNoTrace;
     Cigar* cigar;
-    
-    SizeRange range;
-    // costs to open and extend a gap
     Gaps gaps;
+    SizeRange range;
+
+    bool compBiasCorrection;
+    // weight for the correlation score, if set to 0.0 it is turned off
+    float compBiasCorrectionScale;
+
+    int dbtype;
+    // costs to open and extend a gap
+
     // substitution matrix
-    BaseMatrix* subMat;
+    BaseMatrix* subMat=nullptr;
     SubstitutionMatrix::FastMatrix* fastMatrix ;
     // evalue
     EvalueComputation * evaluer;
     
-    bool compBiasCorrection;
-    // weight for the correlation score, if set to 0.0 it is turned off
-    float compBiasCorrectionScale;
-    int dbtype;
-
+    
+    
     const char* querySeq;
     const unsigned char * queryNumSeq;
     int queryLength;

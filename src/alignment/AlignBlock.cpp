@@ -89,7 +89,6 @@ int doalignblock(Parameters &par,
     bool touch = (par.preloadMode != Parameters::PRELOAD_MODE_MMAP);
     IndexReader * tDbrIdx = new IndexReader(par.db2, par.threads, IndexReader::SEQUENCES,   (touch) ? (IndexReader::PRELOAD_INDEX | IndexReader::PRELOAD_DATA) : 0 );
     tdbr = tDbrIdx->sequenceReader;
-    int targetSeqType = tDbrIdx->getDbtype();
     bool sameQTDB = (par.db2.compare(par.db1) == 0);
     if (sameQTDB == true) {
         qDbrIdx = tDbrIdx;
@@ -114,7 +113,7 @@ int doalignblock(Parameters &par,
                                     : getCovSeqidQscPercMinDiagTargetCov();
                                     
     scorePerColThr = parsePrecisionLib(libraryString, par.seqIdThr, par.covThr, 0.99);
-    std::cout << "Score per column threshold for filtering: " << scorePerColThr << "\n";
+    Debug(Debug::INFO) << "Score per column threshold for filtering: " << scorePerColThr << "\n";
     EvalueComputation evaluer(tdbr->getAminoAcidDBSize(), subMat);
 
     int32_t x_drop = (MIN_SIZE * par.gapExtend.values.aminoacid() + par.gapOpen.values.aminoacid());
@@ -265,14 +264,13 @@ int doalignblock(Parameters &par,
                         int qpos = qStartPos + blockIdx;
                         int dbpos = tStartPos+ blockIdx;
     
-                        // std::cout << "qPos: " << qpos << " dbpos: " << dbpos << std::endl;
     
                         if (querySeq[qpos] == targetSeq[dbpos] &&
                             querySeq[qpos + 1] == targetSeq[dbpos + 1] &&
                             querySeq[qpos + 2] == targetSeq[dbpos + 2]) {
                             
                             // Found 3 consecutive matches
-                            new_qStartPos = qpos + 1;  // 3개 매치 중 가운데 위치
+                            new_qStartPos = qpos + 1; 
                             new_tStartPos = dbpos + 1;
                             foundConsecutiveMatchSeed = true;
                             break;
@@ -340,7 +338,6 @@ int alignblock(int argc, const char **argv, const Command &command) {
 
     int status = doalignblock(par, resultWriter, resultDbr, 0, resultDbr.getSize());
     Debug(Debug::INFO) << "Time for run alignblock: " << timer.lap() << " sec\n";
-    // resultWriter.close(true);
     resultWriter.close();
     resultDbr.close();
     return status;

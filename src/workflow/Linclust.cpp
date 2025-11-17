@@ -93,7 +93,6 @@ int linclust(int argc, const char **argv, const Command& command) {
     cmd.addVariable("VERBOSITY", par.createParameterString(par.onlyverbosity).c_str());
     cmd.addVariable("ALIGNBLOCK_PAR", par.createParameterString(par.alignblock).c_str());
     cmd.addVariable("CLUSTER_PAR", par.createParameterString(par.clust).c_str());
-    cmd.addVariable("MERGECLU_PAR", par.createParameterString(par.threadsandcompression).c_str());
     std::string program = tmpDir + "/linclust.sh";
     FileUtil::writeFile(program, linclust_sh, linclust_sh_len);
     cmd.execProgram(program.c_str(), par.filenames);

@@ -11,4 +11,3 @@ int clust(int argc, const char **argv, const Command& command) {
     clu.run(par.clusteringMode);
     return EXIT_SUCCESS;
 }
-
