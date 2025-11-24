@@ -94,7 +94,7 @@ Parameters::Parameters():
         // alignblock
         PARAM_SKIP_HAMMING(PARAM_SKIP_HAMMING_ID, "-skip-hamming", "Disable hamming distance alignment", "Skip hamming distance based ungapped alignment in alignblock", typeid(bool), (void *) &skipHamming, "", MMseqsParameter::COMMAND_EXPERT),
         // clustering
-        PARAM_CLUSTER_MODE(PARAM_CLUSTER_MODE_ID, "--cluster-mode", "Cluster mode", "0: Set-Cover (greedy)\n1: Connected component (BLASTclust)\n2,3: Greedy clustering by sequence length (CDHIT)", typeid(int), (void *) &clusteringMode, "[0-3]{1}$", MMseqsParameter::COMMAND_CLUST),
+        PARAM_CLUSTER_MODE(PARAM_CLUSTER_MODE_ID, "--cluster-mode", "Cluster mode", "0: Set-Cover (greedy)\n1: Connected component (BLASTclust)\n2,3: Greedy clustering by sequence length (CDHIT)\n4: Set-Cover (static)", typeid(int), (void *) &clusteringMode, "[0-4]{1}$", MMseqsParameter::COMMAND_CLUST),
         PARAM_CLUSTER_STEPS(PARAM_CLUSTER_STEPS_ID, "--cluster-steps", "Cascaded clustering steps", "Cascaded clustering steps from 1 to -s", typeid(int), (void *) &clusterSteps, "^[1-9]{1}$", MMseqsParameter::COMMAND_CLUST | MMseqsParameter::COMMAND_EXPERT),
         PARAM_CASCADED(PARAM_CASCADED_ID, "--single-step-clustering", "Single step clustering", "Switch from cascaded to simple clustering workflow", typeid(bool), (void *) &singleStepClustering, "", MMseqsParameter::COMMAND_CLUST),
         PARAM_CLUSTER_REASSIGN(PARAM_CLUSTER_REASSIGN_ID, "--cluster-reassign", "Cluster reassign", "Cascaded clustering can cluster sequence that do not fulfill the clustering criteria.\nCluster reassignment corrects these errors", typeid(bool), (void *) &clusterReassignment, "", MMseqsParameter::COMMAND_CLUST),

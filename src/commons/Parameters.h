@@ -204,6 +204,7 @@ public:
     static const int CONNECTED_COMPONENT = 1;
     static const int GREEDY = 2;
     static const int GREEDY_MEM = 3;
+    static const int SET_COVER_STATIC = 4;
 
     // clustering
     static const int APC_ALIGNMENTSCORE=1;

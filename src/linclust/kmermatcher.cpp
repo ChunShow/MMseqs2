@@ -562,7 +562,7 @@ size_t assignGroup(KmerPosition<T, IncludeAdjacentSeq> *hashSeqPair, size_t spli
     size_t splitBufferSize = (splitKmerCount-extraMemoryPos)/threads;
 
     threadOffsets.push_back({0, extraMemoryPos});
-    for(size_t thread = 1; thread < threads; thread++){
+    for(int thread = 1; thread < threads; thread++){
         size_t prevHash = hashSeqPair[thread*splitSize].kmer;
         if(TYPE == Parameters::DBTYPE_NUCLEOTIDES){
             prevHash = BIT_SET(prevHash, 63);
@@ -589,7 +589,7 @@ size_t assignGroup(KmerPosition<T, IncludeAdjacentSeq> *hashSeqPair, size_t spli
     threadOffsets.push_back({extraMemoryPos, splitKmerCount});
 
 #pragma omp parallel for schedule(dynamic, 1) num_threads(threads)
-    for(size_t thread = 0; thread < threads; thread++){
+    for(int thread = 0; thread < threads; thread++){
     // threads
     size_t startIdx = threadOffsets[thread].first;
     size_t endIdx = threadOffsets[thread+1].first;
@@ -618,7 +618,7 @@ size_t assignGroup(KmerPosition<T, IncludeAdjacentSeq> *hashSeqPair, size_t spli
     size_t countTableRepSeqs = 0;
     unsigned char repAdjacent[6];
     if (IncludeAdjacentSeq && splitFile != "COUNT_TABLE") {
-        adjacentRepSeqs = 4;
+        adjacentRepSeqs = 3;
         for (size_t i = 0; i < 6; i++) {
             repAdjacent[i] = hashSeqPair[startIdx].getAdjacentSeq(i);
         }
@@ -853,7 +853,7 @@ size_t assignGroup(KmerPosition<T, IncludeAdjacentSeq> *hashSeqPair, size_t spli
 }
     size_t writePos = localWritePos[0].first;
     // re-order hashSeqPair
-    for (size_t thread = 1; thread < threads; thread++) {
+    for (int thread = 1; thread < threads; thread++) {
         size_t startIdx = threadOffsets[thread].first;
         size_t endIdx = startIdx + localWritePos[thread].first;
 

@@ -52,6 +52,8 @@ private:
     void setCover(unsigned int **elementLookup, unsigned short ** elementScoreLookupTable,
                   unsigned int *assignedcluster, short *bestscore, size_t *offsets);
 
+    void setCoverStatic(unsigned int **elementLookup, unsigned int *assignedcluster, size_t *offsets);
+
     void greedyIncremental(unsigned int **elementLookupTable, size_t *elementOffsets,
                            size_t n, unsigned int *assignedcluster) ;
 
@@ -61,6 +63,8 @@ private:
 
     void readInClusterData(unsigned int **elementLookupTable, unsigned int *&elements,
                            unsigned short **scoreLookupTable, unsigned short *&scores,
+                           size_t *elementOffsets, size_t totalElementCount)  ;
+    void readInClusterDataStatic(unsigned int **elementLookupTable, unsigned int *&elements,
                            size_t *elementOffsets, size_t totalElementCount)  ;
 
 };

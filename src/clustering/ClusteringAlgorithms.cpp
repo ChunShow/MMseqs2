@@ -54,7 +54,7 @@ std::pair<unsigned int, unsigned int> * ClusteringAlgorithms::execute(int mode) 
     //time
     if (mode==4 || mode==2) {
         greedyIncrementalLowMem(assignedcluster);
-    } else {
+    } else if (mode == 1 || mode == 3) {
         size_t elementCount = 0;
 #pragma omp parallel reduction (+:elementCount)
         {
@@ -116,7 +116,7 @@ std::pair<unsigned int, unsigned int> * ClusteringAlgorithms::execute(int mode) 
                     }
 
                 }
-            }
+            } 
         }
         //delete unnecessary datastructures
         delete [] sorted_clustersizes;
@@ -130,6 +130,38 @@ std::pair<unsigned int, unsigned int> * ClusteringAlgorithms::execute(int mode) 
         delete [] scoreLookupTable;
         delete [] score;
         delete [] bestscore;
+    }else if (mode == 5) {
+        Debug(Debug::INFO) << "static setcover mode" << "\n";
+        size_t elementCount = 0;
+#pragma omp parallel reduction (+:elementCount)
+        {
+            int thread_idx = 0;
+#ifdef OPENMP
+            thread_idx = omp_get_thread_num();
+#endif
+#pragma omp for schedule(dynamic, 10)
+            for (size_t i = 0; i < alnDbr->getSize(); i++) {
+                const char *data = alnDbr->getData(i, thread_idx);
+                const size_t dataSize = alnDbr->getEntryLen(i);
+                elementCount += (*data == '\0') ? 1 : Util::countLines(data, dataSize);
+            }
+        }
+        unsigned int * elements = new(std::nothrow) unsigned int[elementCount];
+        Util::checkAllocation(elements, "Can not allocate elements memory in ClusteringAlgorithms::execute");
+        unsigned int ** elementLookupTable = new(std::nothrow) unsigned int*[dbSize];
+        Util::checkAllocation(elementLookupTable, "Can not allocate elementLookupTable memory in ClusteringAlgorithms::execute");
+        size_t *elementOffsets = new(std::nothrow) size_t[dbSize + 1];
+        Util::checkAllocation(elementOffsets, "Can not allocate elementOffsets memory in ClusteringAlgorithms::execute");
+        elementOffsets[dbSize] = 0;
+        
+        
+        readInClusterDataStatic(elementLookupTable, elements, elementOffsets, elementCount);
+        ClusteringAlgorithms::initClustersizes();
+        setCoverStatic(elementLookupTable, assignedcluster, elementOffsets);
+        
+        delete[] elements;
+        delete[] elementLookupTable;
+        delete[] elementOffsets;
     }
 
 
@@ -186,6 +218,9 @@ void ClusteringAlgorithms::initClustersizes(){
         setsize_abundance[clustersizes[i]]++;
     }
     delete [] setsize_abundance;
+    delete [] clusterid_to_arrayposition;
+    delete [] borders_of_set;
+    delete [] sorted_clustersizes;
 }
 
 
@@ -276,6 +311,28 @@ void ClusteringAlgorithms::setCover(unsigned int **elementLookupTable, unsigned 
         }
     }
 }
+
+void ClusteringAlgorithms::setCoverStatic(unsigned int **elementLookupTable, unsigned int *assignedcluster, size_t *newElementOffsets) {
+    for (int64_t cl_size = dbSize - 1; cl_size >= 0; cl_size--) {
+        const unsigned int representative = sorted_clustersizes[cl_size];
+        if (assignedcluster[representative] != UINT_MAX) {
+            continue;
+        }
+        assignedcluster[representative] = representative;
+        size_t elementSize = (newElementOffsets[representative + 1] - newElementOffsets[representative]);
+        for (size_t id = 0; id < elementSize; id++) {
+            const unsigned int currentid = elementLookupTable[representative][id];
+            if (currentid == representative) {
+                continue;
+            }
+
+            if (assignedcluster[currentid] == UINT_MAX){
+                assignedcluster[currentid] = representative;
+            }
+        }
+    }
+}
+
 
 void ClusteringAlgorithms::greedyIncrementalLowMem( unsigned int *assignedcluster) {
 
@@ -460,5 +517,68 @@ void ClusteringAlgorithms::readInClusterData(unsigned int **elementLookupTable, 
 
     memcpy(elementOffsets, newElementOffsets, sizeof(size_t) * (dbSize + 1));
     delete[] newElementOffsets;
+    Debug(Debug::INFO) << "\nTime for read in: " << timer.lap() << "\n";
+}
+
+
+void ClusteringAlgorithms::readInClusterDataStatic(unsigned int **elementLookupTable, unsigned int *&elements,
+                                             size_t *elementOffsets, size_t totalElementCount) {
+    Timer timer;
+#pragma omp parallel
+    {
+        int thread_idx = 0;
+#ifdef OPENMP
+        thread_idx = omp_get_thread_num();
+#endif
+#pragma omp for schedule(dynamic, 1000)
+        for (size_t i = 0; i < seqDbr->getSize(); i++) {
+            const unsigned int clusterId = seqDbr->getDbKey(i);
+            if(needSET) {
+                size_t start = sourceOffsets[clusterId];
+                size_t end = sourceOffsets[clusterId+1];
+                size_t len = end - start;
+                size_t lineCounts = 0;
+                for (size_t j = 0; j < len; ++j) {
+                    unsigned int value = sourceLookupTable[clusterId][j];
+                    if (value != UINT_MAX) {
+                        const size_t alnId = alnDbr->getId(value);
+                        const char *data = alnDbr->getData(alnId, thread_idx);
+                        const size_t dataSize = alnDbr->getEntryLen(alnId);
+                        size_t lineCount = (*data == '\0') ? 1 : Util::countLines(data, dataSize);
+                        lineCounts += lineCount;
+                    }
+                }
+                elementOffsets[i] = lineCounts;
+            } else {
+                const size_t alnId = alnDbr->getId(clusterId);
+                const char *data = alnDbr->getData(alnId, thread_idx);
+                const size_t dataSize = alnDbr->getEntryLen(alnId);
+                elementOffsets[i] = (*data == '\0') ? 1 : Util::countLines(data, dataSize);
+            }
+        }
+    }
+
+    // make offset table
+    AlignmentSymmetry::computeOffsetFromCounts(elementOffsets, dbSize);
+    // set element edge pointers by using the offset table
+    AlignmentSymmetry::setupPointers<unsigned int>(elements, elementLookupTable, elementOffsets, dbSize,
+                                                   totalElementCount);
+    // fill elements
+    if(needSET) {
+        AlignmentSymmetry::readInDataSet(alnDbr, seqDbr, elementLookupTable, NULL, 0, elementOffsets, sourceOffsets, sourceLookupTable, keyToSet, 1);
+        AlignmentSymmetry::computeOffsetFromCounts(elementOffsets, dbSize);
+    } else {
+        AlignmentSymmetry::readInData(alnDbr, seqDbr, elementLookupTable, NULL, 0, elementOffsets);
+    }
+    Debug(Debug::INFO) << "Sort entries\n";
+    AlignmentSymmetry::sortElements(elementLookupTable, elementOffsets, dbSize);
+    
+    maxClustersize = 0;
+    for (size_t i = 0; i < dbSize; i++) {
+        size_t elementCount = elementOffsets[i + 1] - elementOffsets[i];
+        maxClustersize = std::max((unsigned int) elementCount, maxClustersize);
+        clustersizes[i] = elementCount;
+    }
+
     Debug(Debug::INFO) << "\nTime for read in: " << timer.lap() << "\n";
 }

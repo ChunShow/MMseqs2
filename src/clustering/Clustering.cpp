@@ -204,6 +204,9 @@ void Clustering::run(int mode) {
     } else if (mode == Parameters::CONNECTED_COMPONENT) {
         Debug(Debug::INFO) << "Clustering mode: Connected Component\n";
         ret = algorithm->execute(3);
+    } else if (mode == Parameters::SET_COVER_STATIC) {
+        Debug(Debug::INFO) << "Clustering mode: Set Cover Static Priority\n";
+        ret = algorithm->execute(5);
     } else {
         Debug(Debug::ERROR) << "Wrong clustering mode!\n";
         EXIT(EXIT_FAILURE);
