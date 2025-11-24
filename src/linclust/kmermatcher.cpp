@@ -74,7 +74,7 @@ std::pair<size_t, size_t> fillKmerPositionArray(KmerPosition<T, IncludeAdjacentS
     }
 
     Debug::Progress progress(seqDbr.getSize());
-#pragma omp parallel
+#pragma omp parallel num_threads(par.threads)
     {
         unsigned int thread_idx = 0;
 #ifdef OPENMP
@@ -507,10 +507,10 @@ KmerPosition<T, IncludeAdjacentSeq> * doComputation(size_t totalKmers, size_t ha
     size_t writePos;
     if(Parameters::isEqualDbtype(seqDbr.getDbtype(), Parameters::DBTYPE_NUCLEOTIDES)){
         writePos = assignGroup<Parameters::DBTYPE_NUCLEOTIDES, T, IncludeAdjacentSeq>(hashSeqPair, totalKmers, par.includeOnlyExtendable, par.covMode, par.covThr, sequenceWeights,
-                                                                                      par.weightThr, elementsToSort, subMat, splitFile, partIndex, par.useCountTable, countTable);
+                                                                                      par.weightThr, elementsToSort, subMat, splitFile, partIndex, par.useCountTable, countTable, par.threads);
     }else{
         writePos = assignGroup<Parameters::DBTYPE_AMINO_ACIDS, T, IncludeAdjacentSeq>(hashSeqPair, totalKmers, par.includeOnlyExtendable, par.covMode, par.covThr, sequenceWeights,
-                                                                                      par.weightThr, elementsToSort, subMat, splitFile, partIndex, par.useCountTable, countTable);
+                                                                                      par.weightThr, elementsToSort, subMat, splitFile, partIndex, par.useCountTable, countTable, par.threads);
         }
 
     delete sequenceWeights;
@@ -555,21 +555,62 @@ KmerPosition<T, IncludeAdjacentSeq> * doComputation(size_t totalKmers, size_t ha
 
 template <int TYPE, typename T, bool IncludeAdjacentSeq>
 size_t assignGroup(KmerPosition<T, IncludeAdjacentSeq> *hashSeqPair, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights * sequenceWeights, 
-                   float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile, int &partIndex, bool useCountTable, const std::vector<short> &countTable) {
-    size_t writePos=0;
-    size_t prevHash = hashSeqPair[0].kmer;
-    size_t repSeqId = hashSeqPair[0].id;
+                   float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile, int &partIndex, bool useCountTable, const std::vector<short> &countTable, int threads) {
+    std::vector<std::pair<size_t, size_t>> threadOffsets;
+    std::vector<std::pair<size_t, size_t>> localWritePos(threads);
+    size_t splitSize = extraMemoryPos/threads;
+    size_t splitBufferSize = (splitKmerCount-extraMemoryPos)/threads;
+
+    threadOffsets.push_back({0, extraMemoryPos});
+    for(size_t thread = 1; thread < threads; thread++){
+        size_t prevHash = hashSeqPair[thread*splitSize].kmer;
+        if(TYPE == Parameters::DBTYPE_NUCLEOTIDES){
+            prevHash = BIT_SET(prevHash, 63);
+        }
+        bool wasSet = false;
+        for(size_t pos = thread*splitSize; pos < extraMemoryPos; pos++){
+            size_t currKmer = hashSeqPair[pos].kmer;
+            if(TYPE == Parameters::DBTYPE_NUCLEOTIDES){
+                currKmer = BIT_SET(currKmer, 63);
+            }
+            if(prevHash != currKmer){
+                wasSet = true;
+                threadOffsets.push_back({pos, extraMemoryPos + thread*splitBufferSize});
+                break;
+            }
+        }
+        if(wasSet == false){
+            for(size_t i = thread; i < threads; i++){
+                threadOffsets.push_back({extraMemoryPos, splitKmerCount});
+            }
+            break;
+        }
+    }
+    threadOffsets.push_back({extraMemoryPos, splitKmerCount});
+
+#pragma omp parallel for schedule(dynamic, 1) num_threads(threads)
+    for(size_t thread = 0; thread < threads; thread++){
+    // threads
+    size_t startIdx = threadOffsets[thread].first;
+    size_t endIdx = threadOffsets[thread+1].first;
+    size_t extraMemoryStart = threadOffsets[thread].second;
+    size_t extraMemoryEnd = threadOffsets[thread+1].second;
+
+    size_t writePos = 0;
+    size_t prevHash = hashSeqPair[startIdx].kmer;
+    size_t repSeqId = hashSeqPair[startIdx].id;
     if(TYPE == Parameters::DBTYPE_NUCLEOTIDES){
-        bool isReverse = (BIT_CHECK(hashSeqPair[0].kmer, 63) == false);
+        bool isReverse = (BIT_CHECK(hashSeqPair[startIdx].kmer, 63) == false);
         repSeqId = (isReverse) ? BIT_CLEAR(repSeqId, 63) : BIT_SET(repSeqId, 63);
         prevHash = BIT_SET(prevHash, 63);
     }
-    size_t prevHashStart = 0;
+    size_t prevHashStart = startIdx;
     size_t prevSetSize = 0;
     size_t skipByWeightCount = 0;
-    T queryLen=hashSeqPair[0].seqLen;
+    T queryLen = hashSeqPair[startIdx].seqLen;
     bool repIsReverse = false;
-    T repSeq_i_pos = hashSeqPair[0].pos;
+    T repSeq_i_pos = hashSeqPair[startIdx].pos;
+
     // for adjacent sequences
     size_t writeExtraPos = 0;
     size_t repSeqNum = 1;
@@ -579,14 +620,14 @@ size_t assignGroup(KmerPosition<T, IncludeAdjacentSeq> *hashSeqPair, size_t spli
     if (IncludeAdjacentSeq && splitFile != "COUNT_TABLE") {
         adjacentRepSeqs = 4;
         for (size_t i = 0; i < 6; i++) {
-            repAdjacent[i] = hashSeqPair[0].getAdjacentSeq(i);
+            repAdjacent[i] = hashSeqPair[startIdx].getAdjacentSeq(i);
         }
     }
     if (useCountTable) {
         countTableRepSeqs = 3;
     }
     repSeqNum += adjacentRepSeqs + countTableRepSeqs;
-    for (size_t elementIdx = 0; elementIdx < extraMemoryPos; elementIdx++) {
+    for (size_t elementIdx = startIdx; elementIdx <= endIdx; elementIdx++) {
         size_t currKmer = hashSeqPair[elementIdx].kmer;
         if(TYPE == Parameters::DBTYPE_NUCLEOTIDES){
             currKmer = BIT_SET(currKmer, 63);
@@ -727,49 +768,49 @@ size_t assignGroup(KmerPosition<T, IncludeAdjacentSeq> *hashSeqPair, size_t spli
                                                             static_cast<float>(hashSeqPair[i].seqLen));
                         if((includeOnlyExtendable == false && canBecovered) || (canBeExtended && includeOnlyExtendable ==true )){
                             if (!IncludeAdjacentSeq || splitFile == "COUNT_TABLE") {
-                                hashSeqPair[writePos].kmer = rId;
-                                hashSeqPair[writePos].pos = diagonal;
-                                hashSeqPair[writePos].seqLen = hashSeqPair[i].seqLen;
-                                hashSeqPair[writePos].id = hashSeqPair[i].id;
+                                hashSeqPair[startIdx + writePos].kmer = rId;
+                                hashSeqPair[startIdx + writePos].pos = diagonal;
+                                hashSeqPair[startIdx + writePos].seqLen = hashSeqPair[i].seqLen;
+                                hashSeqPair[startIdx + writePos].id = hashSeqPair[i].id;
                                 writePos++;
                             }else {
                                 // if possible, store information in an in-place manner
-                                if (writePos < prevHashStart) {
-                                    hashSeqPair[writePos].kmer = rId;
-                                    hashSeqPair[writePos].pos = diagonal;
-                                    hashSeqPair[writePos].seqLen = hashSeqPair[i].seqLen;
-                                    hashSeqPair[writePos].id = hashSeqPair[i].id;
+                                if (startIdx + writePos < prevHashStart) {
+                                    hashSeqPair[startIdx + writePos].kmer = rId;
+                                    hashSeqPair[startIdx + writePos].pos = diagonal;
+                                    hashSeqPair[startIdx + writePos].seqLen = hashSeqPair[i].seqLen;
+                                    hashSeqPair[startIdx + writePos].id = hashSeqPair[i].id;
                                     writePos++;
-                                // otherwise, store information sequentially starting from the extraMemoryPos
+                                // otherwise, store information sequentially starting from extra memory
                                 }
-                                else if (extraMemoryPos + writeExtraPos < splitKmerCount-1) {
-                                    hashSeqPair[extraMemoryPos + writeExtraPos].kmer = rId;
-                                    hashSeqPair[extraMemoryPos + writeExtraPos].pos = diagonal;
-                                    hashSeqPair[extraMemoryPos + writeExtraPos].seqLen = hashSeqPair[i].seqLen;
-                                    hashSeqPair[extraMemoryPos + writeExtraPos].id = hashSeqPair[i].id;
+                                else if (extraMemoryStart + writeExtraPos < extraMemoryEnd-1) {
+                                    hashSeqPair[extraMemoryStart + writeExtraPos].kmer = rId;
+                                    hashSeqPair[extraMemoryStart + writeExtraPos].pos = diagonal;
+                                    hashSeqPair[extraMemoryStart + writeExtraPos].seqLen = hashSeqPair[i].seqLen;
+                                    hashSeqPair[extraMemoryStart + writeExtraPos].id = hashSeqPair[i].id;
                                     writeExtraPos++;
                                 }
                                 // if both are impossible, write disk and then flush momory
                                 else {
-                                    hashSeqPair[extraMemoryPos + writeExtraPos].kmer = rId;
-                                    hashSeqPair[extraMemoryPos + writeExtraPos].pos = diagonal;
-                                    hashSeqPair[extraMemoryPos + writeExtraPos].seqLen = hashSeqPair[i].seqLen;
-                                    hashSeqPair[extraMemoryPos + writeExtraPos].id = hashSeqPair[i].id;
+                                    hashSeqPair[extraMemoryStart + writeExtraPos].kmer = rId;
+                                    hashSeqPair[extraMemoryStart + writeExtraPos].pos = diagonal;
+                                    hashSeqPair[extraMemoryStart + writeExtraPos].seqLen = hashSeqPair[i].seqLen;
+                                    hashSeqPair[extraMemoryStart + writeExtraPos].id = hashSeqPair[i].id;
                                     writeExtraPos++;
 
-                                    std::string splitFilePartName = splitFile + "_part_" + SSTR(partIndex);
+                                    int currIdx = __sync_fetch_and_add(&partIndex, 1);
+                                    std::string splitFilePartName = splitFile + "_part_" + SSTR(currIdx);
                                     std::string splitFilePartNameDone = splitFilePartName + ".done";
                                     
                                     if (FileUtil::fileExists(splitFilePartNameDone.c_str()) == false) {
                                         if(TYPE == Parameters::DBTYPE_NUCLEOTIDES){
-                                            SORT_PARALLEL(hashSeqPair, hashSeqPair + writePos, KmerPosition<T, IncludeAdjacentSeq>::compareRepSequenceAndIdAndDiagReverse);
-                                            writeKmersToDisk<Parameters::DBTYPE_NUCLEOTIDES, KmerEntryRev, T, IncludeAdjacentSeq>(splitFilePartName, hashSeqPair, writePos);
+                                            SORT_PARALLEL(hashSeqPair + startIdx, hashSeqPair + startIdx + writePos, KmerPosition<T, IncludeAdjacentSeq>::compareRepSequenceAndIdAndDiagReverse);
+                                            writeKmersToDisk<Parameters::DBTYPE_NUCLEOTIDES, KmerEntryRev, T, IncludeAdjacentSeq>(splitFilePartName, hashSeqPair + startIdx, writePos);
                                         }else{
-                                            SORT_PARALLEL(hashSeqPair, hashSeqPair + writePos, KmerPosition<T, IncludeAdjacentSeq>::compareRepSequenceAndIdAndDiag);     
-                                            writeKmersToDisk<Parameters::DBTYPE_AMINO_ACIDS, KmerEntry, T, IncludeAdjacentSeq>(splitFilePartName, hashSeqPair, writePos);
+                                            SORT_PARALLEL(hashSeqPair + startIdx, hashSeqPair + startIdx + writePos, KmerPosition<T, IncludeAdjacentSeq>::compareRepSequenceAndIdAndDiag);     
+                                            writeKmersToDisk<Parameters::DBTYPE_AMINO_ACIDS, KmerEntry, T, IncludeAdjacentSeq>(splitFilePartName, hashSeqPair + startIdx, writePos);
                                         }
                                     }
-                                    partIndex++;
                                     writePos = 0;
                                 }
                             }
@@ -808,15 +849,35 @@ size_t assignGroup(KmerPosition<T, IncludeAdjacentSeq> *hashSeqPair, size_t spli
             skipByWeightCount++;
     }
 
+    localWritePos[thread] = {writePos, writeExtraPos};
+}
+    size_t writePos = localWritePos[0].first;
+    // re-order hashSeqPair
+    for (size_t thread = 1; thread < threads; thread++) {
+        size_t startIdx = threadOffsets[thread].first;
+        size_t endIdx = startIdx + localWritePos[thread].first;
+
+        for(size_t i = startIdx; i < endIdx; i++) {
+            hashSeqPair[writePos++] = hashSeqPair[i];
+        }
+    }
+
     if (IncludeAdjacentSeq && splitFile != "COUNT_TABLE") {
         if (splitFile == "RESIZE") {
+            size_t writeExtraPos = localWritePos[0].second;
+            for (size_t thread = 1; thread < threads; thread++) {
+                writeExtraPos += localWritePos[thread].second;
+            }
             return writeExtraPos;
         }
-        // re-order hashSeqPair
-        for (size_t i = 0; i < writeExtraPos; i++) {
-            hashSeqPair[writePos + i] = hashSeqPair[extraMemoryPos + i];
+
+        for (size_t thread = 0; thread < threads; thread++) {
+            size_t startIdx = threadOffsets[thread].second;
+            size_t endIdx = startIdx + localWritePos[thread].second;
+            for(size_t i = startIdx; i < endIdx; i++) {
+                hashSeqPair[writePos++] = hashSeqPair[i];
+            }
         }
-        writePos = writePos + writeExtraPos;
     }
     // set the last element to SIZE_T_MAX
     hashSeqPair[writePos].kmer = SIZE_T_MAX;
@@ -824,14 +885,14 @@ size_t assignGroup(KmerPosition<T, IncludeAdjacentSeq> *hashSeqPair, size_t spli
     return writePos;
 }
 
-template size_t assignGroup<0, short, true>(KmerPosition<short, true> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile, int &partIndex, bool useCountTable, const std::vector<short> &countTable);
-template size_t assignGroup<0, short, false>(KmerPosition<short, false> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile, int &partIndex, bool useCountTable, const std::vector<short> &countTable);
-template size_t assignGroup<0, int, true>(KmerPosition<int, true> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile, int &partIndex, bool useCountTable, const std::vector<short> &countTable);
-template size_t assignGroup<0, int, false>(KmerPosition<int, false> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile, int &partIndex, bool useCountTable, const std::vector<short> &countTable);
-template size_t assignGroup<1, short, true>(KmerPosition<short, true> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile, int &partIndex, bool useCountTable, const std::vector<short> &countTable);
-template size_t assignGroup<1, short, false>(KmerPosition<short, false> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile, int &partIndex, bool useCountTable, const std::vector<short> &countTable);
-template size_t assignGroup<1, int, true>(KmerPosition<int, true> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile, int &partIndex, bool useCountTable, const std::vector<short> &countTable);
-template size_t assignGroup<1, int, false>(KmerPosition<int, false> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile, int &partIndex, bool useCountTable, const std::vector<short> &countTable);
+template size_t assignGroup<0, short, true>(KmerPosition<short, true> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile, int &partIndex, bool useCountTable, const std::vector<short> &countTable, int threads);
+template size_t assignGroup<0, short, false>(KmerPosition<short, false> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile, int &partIndex, bool useCountTable, const std::vector<short> &countTable, int threads);
+template size_t assignGroup<0, int, true>(KmerPosition<int, true> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile, int &partIndex, bool useCountTable, const std::vector<short> &countTable, int threads);
+template size_t assignGroup<0, int, false>(KmerPosition<int, false> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile, int &partIndex, bool useCountTable, const std::vector<short> &countTable, int threads);
+template size_t assignGroup<1, short, true>(KmerPosition<short, true> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile, int &partIndex, bool useCountTable, const std::vector<short> &countTable, int threads);
+template size_t assignGroup<1, short, false>(KmerPosition<short, false> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile, int &partIndex, bool useCountTable, const std::vector<short> &countTable, int threads);
+template size_t assignGroup<1, int, true>(KmerPosition<int, true> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile, int &partIndex, bool useCountTable, const std::vector<short> &countTable, int threads);
+template size_t assignGroup<1, int, false>(KmerPosition<int, false> *kmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, SequenceWeights *sequenceWeights, float weightThr, size_t extraMemoryPos, BaseMatrix *subMat, std::string splitFile, int &partIndex, bool useCountTable, const std::vector<short> &countTable, int threads);
 
 
 void setLinearFilterDefault(Parameters *p) {
