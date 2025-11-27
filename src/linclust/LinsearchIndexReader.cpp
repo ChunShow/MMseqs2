@@ -41,7 +41,7 @@ size_t LinsearchIndexReader::pickCenterKmer(KmerPosition<short> *hashSeqPair, si
             if (kmer != SIZE_T_MAX) {
                 hashSeqPair[writePos].kmer = hashSeqPair[randIdx].kmer;
                 hashSeqPair[writePos].pos = hashSeqPair[randIdx].pos;
-                hashSeqPair[writePos].seqLen = hashSeqPair[randIdx].seqLen;
+                // hashSeqPair[writePos].seqLen = hashSeqPair[randIdx].seqLen;
                 hashSeqPair[writePos].id = hashSeqPair[randIdx].id;
                 writePos++;
             }
@@ -96,7 +96,7 @@ void LinsearchIndexReader::mergeAndWriteIndex(DBWriter & dbw, std::vector<std::s
                 isReverse = (BIT_CHECK(currKmerPosition.kmer, 63) == false);
                 currKmer = BIT_CLEAR(currKmer, 63);
             }
-            queue.push(FileKmer(currKmer, currKmerPosition.id, currKmerPosition.pos, currKmerPosition.seqLen, isReverse, file));
+            queue.push(FileKmer(currKmer, currKmerPosition.id, currKmerPosition.pos, KmerPosition<short>::seqkey_to_len[currKmerPosition.id], isReverse, file));
         }
     }
     std::string prefResultsOutString;
@@ -116,7 +116,7 @@ void LinsearchIndexReader::mergeAndWriteIndex(DBWriter & dbw, std::vector<std::s
                     currKmer = BIT_CLEAR(currKmer, 63);
                 }
                 queue.push(FileKmer(currKmer, entries[res.file][offset + 1].id,
-                                    entries[res.file][offset + 1].pos,  entries[res.file][offset + 1].seqLen,
+                                    entries[res.file][offset + 1].pos,  entries[res.file][offset + 1].seqkey_to_len[entries[res.file][offset + 1].id],
                                     isReverse, res.file));
                 offsetPos[res.file] = offset + 1;
             }
@@ -194,7 +194,7 @@ void LinsearchIndexReader::writeIndex(DBWriter & dbw,
             kmerIndex.flush(dbw);
         }
 
-        kmerIndex.addElementSorted(kmer, hashSeqPair[pos].id, hashSeqPair[pos].pos, hashSeqPair[pos].seqLen, isReverse);
+        kmerIndex.addElementSorted(kmer, hashSeqPair[pos].id, hashSeqPair[pos].pos, hashSeqPair[pos].seqkey_to_len[hashSeqPair[pos].id], isReverse);
     }
     kmerIndex.flush(dbw);
     dbw.writeEnd(PrefilteringIndexReader::ENTRIES, 0);

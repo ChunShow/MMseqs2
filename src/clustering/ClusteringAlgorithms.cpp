@@ -19,6 +19,7 @@ ClusteringAlgorithms::ClusteringAlgorithms(DBReader<unsigned int>* seqDbr, DBRea
                                            unsigned int *keyToSet, size_t *sourceOffsets, unsigned int **sourceLookupTable, unsigned int *sourceList, unsigned int sourceLen, bool needSET){
     this->seqDbr=seqDbr;
     if(seqDbr->getSize() != alnDbr->getSize() && needSET == false){
+        std::cout << "Error: Sequence db size != result db size: " << seqDbr->getSize() << " != " << alnDbr->getSize() << std::endl;
         Debug(Debug::ERROR) << "Sequence db size != result db size\n";
         EXIT(EXIT_FAILURE);
     }

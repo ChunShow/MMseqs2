@@ -384,14 +384,14 @@ std::pair<KmerPosition<short> *,size_t > KmerSearch::searchInIndex(KmerPosition<
                     // this is equal to both are extract on the forward strand
                     // we just need to offset the position to the forward strand
                 }else if (repIsReverse == true && targetIsReverse == true){
-                    queryPos  = (currTargetKmer.seqLen - 1) - currTargetKmer.pos;
-                    targetPos = (currQueryKmer->seqLen - 1) - currQueryKmer->pos;
+                    queryPos  = (KmerPosition<short>::seqkey_to_len[currTargetKmer.id] - 1) - currTargetKmer.pos;
+                    targetPos = (KmerPosition<short>::seqkey_to_len[currQueryKmer->id] - 1) - currQueryKmer->pos;
                     queryNeedsToBeRev = false;
                     // query is not revers but target k-mer is reverse
                     // instead of reverting the target, we revert the query and offset the the query/target position
                 }else if (repIsReverse == false && targetIsReverse == true){
-                    queryPos  = (currTargetKmer.seqLen - 1) - currTargetKmer.pos;
-                    targetPos = (currQueryKmer->seqLen - 1) - currQueryKmer->pos;
+                    queryPos  = (KmerPosition<short>::seqkey_to_len[currTargetKmer.id] - 1) - currTargetKmer.pos;
+                    targetPos = (KmerPosition<short>::seqkey_to_len[currQueryKmer->id] - 1) - currQueryKmer->pos;
                     queryNeedsToBeRev = true;
                     // both are forward, everything is good here
                 }
@@ -409,7 +409,7 @@ std::pair<KmerPosition<short> *,size_t > KmerSearch::searchInIndex(KmerPosition<
                 (kmers+writePos)->pos  = (queryTargetSwitched) ? currTargetKmer.pos - currQueryKmer->pos :
                                          currQueryKmer->pos - currTargetKmer.pos;
             }
-            (kmers+writePos)->seqLen = currQueryKmer->seqLen;
+            // (kmers+writePos)->seqLen = KmerPosition<short>::seqkey_to_len[currQueryKmer.id];
 
             writePos++;
             if(kmerPos+1<kmersSize){
