@@ -210,6 +210,9 @@ template  <int TYPE, typename T>
 size_t assignGroup(KmerPosition<T> *kmers, KmerPosition<T> *writeKmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, int threads);
 
 template <int TYPE, typename T>
+void mergeKmerFilesAndOutput2(DBWriter & dbw, std::vector<std::vector<std::string>>& tmpFiles, std::vector<char> &repSequence, int threads);
+
+template <int TYPE, typename T>
 void mergeKmerFilesAndOutput(DBWriter & dbw, std::vector<std::string> tmpFiles, std::vector<char> &repSequence);
 
 typedef std::priority_queue<FileKmerPosition, std::vector<FileKmerPosition>, CompareResultBySeqId> KmerPositionQueue;
@@ -222,14 +225,20 @@ void setKmerLengthAndAlphabet(Parameters &parameters, size_t aaDbSize, int seqTy
 template <int TYPE, typename T, typename seqLenType>
 void writeKmersToDisk(std::string tmpFile, KmerPosition<seqLenType> *kmers, size_t totalKmers);
 
+template <int TYPE, typename T, typename seqLenType>
+void writeKmersToDisk2(std::string tmpFile, KmerPosition<seqLenType> *hashSeqPair, size_t totalKmers, std::vector<size_t>& threadQueryOffsets, int numThreads, std::vector<std::vector<std::string>>& totalFiles);
+ 
+
 template <int TYPE, typename T>
 void writeKmerMatcherResult(DBWriter & dbw, KmerPosition<T> *hashSeqPair, size_t totalKmers,
                             std::vector<char> &repSequence, size_t threads);
 
 
+
+
 template <typename T>
 KmerPosition<T> * doComputation(size_t totalKmers, size_t split, size_t splits, std::string splitFile,
-                                DBReader<unsigned int> & seqDbr, Parameters & par, BaseMatrix  * subMat,
+                                DBReader<unsigned int> & seqDbr, Parameters & par, BaseMatrix  * subMat, std::vector<std::vector<std::string>>& totalFiles,
                                 size_t KMER_SIZE, size_t chooseTopKmer, float chooseTopKmerScale = 0.0);
 template <typename T>
 KmerPosition<T> *initKmerPositionMemory(size_t size);

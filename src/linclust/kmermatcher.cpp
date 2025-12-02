@@ -422,11 +422,9 @@ template void swapCenterSequence<1, int>(KmerPosition<int> *kmers, size_t splitK
 
 template <typename T>
 KmerPosition<T> * doComputation(size_t totalKmers, size_t hashStartRange, size_t hashEndRange, std::string splitFile,
-                                DBReader<unsigned int> & seqDbr, Parameters & par, BaseMatrix  * subMat) {
+                                DBReader<unsigned int> & seqDbr, Parameters & par, BaseMatrix  * subMat, std::vector<std::vector<std::string>>& totalFiles) {
 
     KmerPosition<T> * hashSeqPair = initKmerPositionMemory<T>(totalKmers);
-    // KmerPosition<T> * writeSeqPair = new(std::nothrow) KmerPosition<T>[size + 1];
-    // Util::checkAllocation(writeSeqPair, "Can not allocate memory");
     KmerPosition<T> * writeSeqPair = initKmerPositionMemory<T>(totalKmers);
     size_t elementsToSort;
     if(Parameters::isEqualDbtype(seqDbr.getDbtype(), Parameters::DBTYPE_NUCLEOTIDES)){
@@ -501,24 +499,24 @@ KmerPosition<T> * doComputation(size_t totalKmers, size_t hashStartRange, size_t
     for(int thread = 1; thread < par.threads; thread++){
         size_t startqid = splitSize * thread;
         KmerPosition<T>* it = std::lower_bound(
-            hashSeqPair,
-            hashSeqPair + elementsToSort,
+            writeSeqPair,
+            writeSeqPair + writePos,
             startqid,
             [](const KmerPosition<T>& elem, size_t k) {
                 return elem.kmer < k;
             }
         );
-        size_t startIndex = it - hashSeqPair;
+        size_t startIndex = it - writeSeqPair;
         threadQueryOffsets[thread] = startIndex;
     }
-    threadQueryOffsets[par.threads] = elementsToSort;
+    threadQueryOffsets[par.threads] = writePos;
 
 
     timer.reset();
     if(Parameters::isEqualDbtype(seqDbr.getDbtype(), Parameters::DBTYPE_NUCLEOTIDES)){
-        writeKmersToDisk<Parameters::DBTYPE_NUCLEOTIDES, KmerEntryRev, T>(splitFile, writeSeqPair, writePos + 1);
+        writeKmersToDisk2<Parameters::DBTYPE_NUCLEOTIDES, KmerEntryRev, T>(splitFile, writeSeqPair, writePos + 1, threadQueryOffsets, par.threads, totalFiles);
     }else{
-        writeKmersToDisk<Parameters::DBTYPE_AMINO_ACIDS, KmerEntry, T>(splitFile, writeSeqPair, writePos + 1); 
+        writeKmersToDisk2<Parameters::DBTYPE_AMINO_ACIDS, KmerEntry, T>(splitFile, writeSeqPair, writePos + 1, threadQueryOffsets, par.threads, totalFiles); 
     }
     Debug(Debug::INFO) << "Time for writeKmerToDisk: " << timer.lap() << "\n";
     delete [] hashSeqPair;
@@ -824,62 +822,36 @@ int kmermatcherInner(Parameters& par, DBReader<unsigned int>& seqDbr) {
     Debug(Debug::INFO) << "Time for seqKeyToLenFill: " << timer.lap() << "\n";
 
     KmerPosition<T>::seqkey_to_len = seqkey_to_len;
-    std::vector<std::string> splitFiles;
+    std::vector<std::vector<std::string>> totalFiles;
+    totalFiles.resize(par.threads);
     KmerPosition<T> *hashSeqPair = NULL;
     for(size_t split = 0; split < hashRanges.size(); split++) {
         std::string splitFileName = par.db2 + "_split_" +SSTR(split);
         Debug(Debug::INFO) << "Generate k-mers list for " << (split+1) <<" split\n";
-
-        std::string splitFileNameDone = splitFileName + ".done";
-        if(FileUtil::fileExists(splitFileNameDone.c_str()) == false){
-            hashSeqPair = doComputation<T>(totalKmersPerSplit, hashRanges[split].first, hashRanges[split].second, splitFileName, seqDbr, par, subMat);
-        }
-
-        splitFiles.push_back(splitFileName);
+        hashSeqPair = doComputation<T>(totalKmersPerSplit, hashRanges[split].first, hashRanges[split].second, splitFileName, seqDbr, par, subMat, totalFiles);
     }
     
     std::vector<char> repSequence(seqDbr.getLastKey()+1);
     std::fill(repSequence.begin(), repSequence.end(), false);
     // write result
-    // DBWriter dbw(par.db2.c_str(), par.db2Index.c_str(), par.threads, par.compressed,
-    //                 (Parameters::isEqualDbtype(seqDbr.getDbtype(), Parameters::DBTYPE_NUCLEOTIDES)) ? Parameters::DBTYPE_PREFILTER_REV_RES : Parameters::DBTYPE_PREFILTER_RES );
-    DBWriter dbw(par.db2.c_str(), par.db2Index.c_str(), 1, par.compressed,
-                 (Parameters::isEqualDbtype(seqDbr.getDbtype(), Parameters::DBTYPE_NUCLEOTIDES)) ? Parameters::DBTYPE_PREFILTER_REV_RES : Parameters::DBTYPE_PREFILTER_RES );
+    DBWriter dbw(par.db2.c_str(), par.db2Index.c_str(), par.threads, par.compressed,
+                    (Parameters::isEqualDbtype(seqDbr.getDbtype(), Parameters::DBTYPE_NUCLEOTIDES)) ? Parameters::DBTYPE_PREFILTER_REV_RES : Parameters::DBTYPE_PREFILTER_RES );
     
     dbw.open();
 
     timer.reset();
     seqDbr.unmapData();
     if(Parameters::isEqualDbtype(seqDbr.getDbtype(), Parameters::DBTYPE_NUCLEOTIDES)) {
-        mergeKmerFilesAndOutput<Parameters::DBTYPE_NUCLEOTIDES, KmerEntryRev>(dbw, splitFiles, repSequence);
+        mergeKmerFilesAndOutput2<Parameters::DBTYPE_NUCLEOTIDES, KmerEntryRev>(dbw, totalFiles, repSequence, par.threads);
     }else{
-        mergeKmerFilesAndOutput<Parameters::DBTYPE_AMINO_ACIDS, KmerEntry>(dbw, splitFiles, repSequence);
+        mergeKmerFilesAndOutput2<Parameters::DBTYPE_AMINO_ACIDS, KmerEntry>(dbw, totalFiles, repSequence, par.threads);
     }
-    for(size_t i = 0; i < splitFiles.size(); i++){
-        FileUtil::remove(splitFiles[i].c_str());
-        std::string splitFilesDone = splitFiles[i] + ".done";
-        FileUtil::remove(splitFilesDone.c_str());
+    for(size_t i = 0; i < totalFiles.size(); i++){
+        for (size_t j = 0; j < totalFiles[i].size(); j++) {
+            FileUtil::remove(totalFiles[i][j].c_str());   
+        }
     }
-    // if(splits > 1) {
-    //     seqDbr.unmapData();
-    //     if(Parameters::isEqualDbtype(seqDbr.getDbtype(), Parameters::DBTYPE_NUCLEOTIDES)) {
-    //         mergeKmerFilesAndOutput<Parameters::DBTYPE_NUCLEOTIDES, KmerEntryRev>(dbw, splitFiles, repSequence);
-    //     }else{
-    //         mergeKmerFilesAndOutput<Parameters::DBTYPE_AMINO_ACIDS, KmerEntry>(dbw, splitFiles, repSequence);
-    //     }
-    //     for(size_t i = 0; i < splitFiles.size(); i++){
-    //         FileUtil::remove(splitFiles[i].c_str());
-    //         std::string splitFilesDone = splitFiles[i] + ".done";
-    //         FileUtil::remove(splitFilesDone.c_str());
-    //     }
-    // } else {
-    //     if(Parameters::isEqualDbtype(seqDbr.getDbtype(), Parameters::DBTYPE_NUCLEOTIDES)) {
-    //         writeKmerMatcherResult<Parameters::DBTYPE_NUCLEOTIDES>(dbw, hashSeqPair, totalKmersPerSplit, repSequence, 1);
-    //     }else{
-    //         // writeKmerMatcherResult<Parameters::DBTYPE_AMINO_ACIDS>(dbw, hashSeqPair, totalKmersPerSplit, repSequence, par.threads);
-    //         writeKmerMatcherResult<Parameters::DBTYPE_AMINO_ACIDS>(dbw, hashSeqPair, totalKmersPerSplit, repSequence, 1);
-    //     }
-    // }
+
     Debug(Debug::INFO) << "Time for fill: " << timer.lap() << "\n";
     // add missing entries to the result (needed for clustering)
 
@@ -1131,6 +1103,257 @@ size_t queueNextEntry(KmerPositionQueue &queue, int file, size_t offsetPos, T *e
 }
 
 template <int TYPE, typename T>
+void mergeKmerFilesAndOutput2(DBWriter & dbw,
+                             std::vector<std::vector<std::string>>& tmpFiles,
+                             std::vector<char> &repSequence, int numThreads) {
+    Debug(Debug::INFO) << "Merge splits ... \n";
+    #pragma omp parallel for num_threads(numThreads)
+    for(int thread_idx = 0; thread_idx < numThreads; thread_idx++){
+        const int fileCnt = tmpFiles[thread_idx].size();
+        FILE ** files       = new FILE*[fileCnt];
+        T **entries = new T*[fileCnt];
+        size_t * entrySizes = new size_t[fileCnt];
+        size_t * offsetPos  = new size_t[fileCnt];
+        size_t * dataSizes  = new size_t[fileCnt];
+        for(size_t file = 0; file < tmpFiles[thread_idx].size(); file++){
+            files[file] = FileUtil::openFileOrDie(tmpFiles[thread_idx][file].c_str(),"r",true);
+            size_t dataSize;
+            struct stat sb;
+            fstat(fileno(files[file]) , &sb);
+            if(sb.st_size > 0){
+                entries[file]    = (T*)FileUtil::mmapFile(files[file], &dataSize);
+    #if HAVE_POSIX_MADVISE
+                if (posix_madvise (entries[file], dataSize, POSIX_MADV_SEQUENTIAL) != 0){
+                    Debug(Debug::ERROR) << "posix_madvise returned an error for file " << tmpFiles[thread_idx][file] << "\n";
+                }
+    #endif
+            }else{
+                dataSize = 0;
+            }
+
+            dataSizes[file]  = dataSize;
+            entrySizes[file] = dataSize/sizeof(T);
+        }
+
+        KmerPositionQueue queue;
+        // read one entry for each file
+        for(int file = 0; file < fileCnt; file++ ){
+            offsetPos[file] = queueNextEntry<TYPE,T>(queue, file, 0, entries[file], entrySizes[file]);
+        }
+
+        std::string prefResultsOutString;
+        prefResultsOutString.reserve(100000000);
+        char buffer[100];
+        FileKmerPosition res;
+        unsigned int currRepSeq = UINT_MAX;
+        if(queue.empty() == false){
+            res = queue.top();
+            currRepSeq = res.repSeq;
+            hit_t h;
+            h.seqId = res.repSeq;
+            h.prefScore = 0;
+            h.diagonal = 0;
+            int len = QueryMatcher::prefilterHitToBuffer(buffer, h);
+            prefResultsOutString.append(buffer, len);
+        }
+        while(queue.empty() == false) {
+            res = queue.top();
+            queue.pop();
+            if(res.id == UINT_MAX) {
+                offsetPos[res.file] = queueNextEntry<TYPE,T>(queue, res.file, offsetPos[res.file],
+                                                            entries[res.file], entrySizes[res.file]);
+                dbw.writeData(prefResultsOutString.c_str(), prefResultsOutString.length(), res.repSeq, thread_idx);
+                // if(hasRepSeq){
+                    repSequence[res.repSeq]=true;
+                // }
+                prefResultsOutString.clear();
+                // skipe UINT MAX entries
+                while(queue.empty() == false && queue.top().id==UINT_MAX) {
+                    res = queue.top();
+                    queue.pop();
+                    offsetPos[res.file] = queueNextEntry<TYPE,T>(queue, res.file, offsetPos[res.file],
+                                                                entries[res.file], entrySizes[res.file]);
+                }
+                if(queue.empty() == false) {
+                    res = queue.top();
+                    currRepSeq = res.repSeq;
+                    queue.pop();
+                    // if(hasRepSeq){
+                        hit_t h;
+                        h.seqId = res.repSeq;
+                        h.prefScore = 0;
+                        h.diagonal = 0;
+                        int len = QueryMatcher::prefilterHitToBuffer(buffer, h);
+                        prefResultsOutString.append(buffer, len);
+                    // }
+                }
+            }
+
+            bool hitIsRepSeq = (currRepSeq == res.id);
+            // skip rep. seq. if set does not have rep. sequences
+            if(hitIsRepSeq){
+                continue;
+            }
+            // if its not a duplicate
+            // find maximal diagonal and top score
+            int bestDiagonalCnt = 0;
+            int bestRevertMask = 0;
+            short bestDiagonal = res.pos;
+            int topScore = 0;
+            unsigned int hitId;
+            unsigned int prevHitId;
+            int diagonalScore = 0;
+            short prevDiagonal = res.pos;
+            do {
+                prevHitId = res.id;
+                diagonalScore = (diagonalScore == 0 || prevDiagonal!=res.pos) ? res.score : diagonalScore + res.score;
+                if(diagonalScore >= bestDiagonalCnt){
+                    bestDiagonalCnt = diagonalScore;
+                    bestDiagonal = res.pos;
+                    bestRevertMask = res.reverse;
+                }
+                prevDiagonal = res.pos;
+                topScore += res.score;
+                if(queue.empty() == false) {
+                    res = queue.top();
+                    queue.pop();
+                    hitId = res.id;
+                    if(hitId != prevHitId){
+                        queue.push(res);
+                    }
+                }else{
+                    hitId = UINT_MAX;
+                }
+
+            } while(hitId == prevHitId && res.repSeq == currRepSeq && hitId != UINT_MAX);
+
+            hit_t h;
+            h.seqId = prevHitId;
+            h.prefScore =  (bestRevertMask) ? -topScore : topScore;
+            h.diagonal =  bestDiagonal;
+            int len = QueryMatcher::prefilterHitToBuffer(buffer, h);
+            prefResultsOutString.append(buffer, len);
+        }
+
+        for(size_t file = 0; file < tmpFiles[thread_idx].size(); file++) {
+            if (fclose(files[file]) != 0) {
+                Debug(Debug::ERROR) << "Cannot close file " << tmpFiles[thread_idx][file] << "\n";
+                EXIT(EXIT_FAILURE);
+            }
+            if(dataSizes[file] > 0 && munmap((void*)entries[file], dataSizes[file]) < 0){
+                Debug(Debug::ERROR) << "Failed to munmap memory dataSize=" << dataSizes[file] <<"\n";
+                EXIT(EXIT_FAILURE);
+            }
+        }
+
+        delete [] dataSizes;
+        delete [] offsetPos;
+        delete [] entries;
+        delete [] entrySizes;
+        delete [] files;
+
+    }
+
+
+    
+}
+
+
+template <int TYPE, typename T, typename seqLenType>
+void writeKmersToDisk(std::string tmpFile, KmerPosition<seqLenType> *hashSeqPair, size_t totalKmers) {
+    size_t repSeqId = SIZE_T_MAX;
+    size_t lastTargetId = SIZE_T_MAX;
+    seqLenType lastDiagonal=0;
+    int diagonalScore=0;
+    FILE* filePtr = fopen(tmpFile.c_str(), "wb");
+    if(filePtr == NULL) { perror(tmpFile.c_str()); EXIT(EXIT_FAILURE); }
+    unsigned int writeSets = 0;
+    const size_t BUFFER_SIZE = 2048;
+    size_t bufferPos = 0;
+    size_t elemenetCnt = 0;
+    T writeBuffer[BUFFER_SIZE];
+    T nullEntry;
+    nullEntry.seqId=UINT_MAX;
+    nullEntry.diagonal=0;
+    for(size_t kmerPos = 0; kmerPos < totalKmers && hashSeqPair[kmerPos].kmer != SIZE_T_MAX; kmerPos++){
+        size_t currKmer=hashSeqPair[kmerPos].kmer;
+        if(TYPE == Parameters::DBTYPE_NUCLEOTIDES){
+            currKmer = BIT_CLEAR(currKmer, 63);
+        }
+        if(repSeqId != currKmer) {
+            if (writeSets > 0 && elemenetCnt > 0) {
+                if(bufferPos > 0){
+                    fwrite(writeBuffer, sizeof(T), bufferPos, filePtr);
+                }
+                fwrite(&nullEntry, sizeof(T), 1, filePtr);
+            }
+            lastTargetId = SIZE_T_MAX;
+            bufferPos=0;
+            elemenetCnt=0;
+            repSeqId = currKmer;
+            writeBuffer[bufferPos].seqId = repSeqId;
+            writeBuffer[bufferPos].score = 0;
+            writeBuffer[bufferPos].diagonal = 0;
+            if(TYPE == Parameters::DBTYPE_NUCLEOTIDES){
+                bool isReverse = BIT_CHECK(hashSeqPair[kmerPos].kmer, 63)==false;
+                writeBuffer[bufferPos].setReverse(isReverse);
+            }
+            bufferPos++;
+        }
+
+        unsigned int targetId = hashSeqPair[kmerPos].id;
+        seqLenType diagonal = hashSeqPair[kmerPos].pos;
+        int forward = 0;
+        int reverse = 0;
+        // find diagonal score
+        do{
+            diagonalScore += (diagonalScore == 0 || (lastTargetId == targetId && lastDiagonal == diagonal) );
+            lastTargetId = hashSeqPair[kmerPos].id;
+            lastDiagonal = hashSeqPair[kmerPos].pos;
+            if(TYPE == Parameters::DBTYPE_NUCLEOTIDES){
+                bool isReverse  = BIT_CHECK(hashSeqPair[kmerPos].kmer, 63)==false;
+                forward += isReverse == false;
+                reverse += isReverse == true;
+            }
+            kmerPos++;
+        }while(targetId == hashSeqPair[kmerPos].id && hashSeqPair[kmerPos].pos == diagonal && kmerPos < totalKmers && hashSeqPair[kmerPos].kmer != SIZE_T_MAX);
+        kmerPos--;
+
+        elemenetCnt++;
+        writeBuffer[bufferPos].seqId = targetId;
+        writeBuffer[bufferPos].score = diagonalScore;
+        diagonalScore = 0;
+        writeBuffer[bufferPos].diagonal = diagonal;
+        if(TYPE == Parameters::DBTYPE_NUCLEOTIDES){
+            bool isReverse = (reverse>forward)? true : false;
+            writeBuffer[bufferPos].setReverse(isReverse);
+        }
+        bufferPos++;
+        if(bufferPos >= BUFFER_SIZE){
+            fwrite(writeBuffer, sizeof(T), bufferPos, filePtr);
+            bufferPos=0;
+        }
+        lastTargetId = targetId;
+        writeSets++;
+    }
+    if (writeSets > 0 && elemenetCnt > 0 && bufferPos > 0) {
+        fwrite(writeBuffer, sizeof(T), bufferPos, filePtr);
+        fwrite(&nullEntry,  sizeof(T), 1, filePtr);
+    }
+    if (fclose(filePtr) != 0) {
+        Debug(Debug::ERROR) << "Cannot close file " << tmpFile << "\n";
+        EXIT(EXIT_FAILURE);
+    }
+    std::string fileName = tmpFile + ".done";
+    FILE* done = FileUtil::openFileOrDie(fileName.c_str(),"w", false);
+    if (fclose(done) != 0) {
+        Debug(Debug::ERROR) << "Cannot close file " << fileName << "\n";
+        EXIT(EXIT_FAILURE);
+    }
+}
+
+
+template <int TYPE, typename T>
 void mergeKmerFilesAndOutput(DBWriter & dbw,
                              std::vector<std::string> tmpFiles,
                              std::vector<char> &repSequence) {
@@ -1290,99 +1513,113 @@ void mergeKmerFilesAndOutput(DBWriter & dbw,
     delete [] files;
 }
 
-
 template <int TYPE, typename T, typename seqLenType>
-void writeKmersToDisk(std::string tmpFile, KmerPosition<seqLenType> *hashSeqPair, size_t totalKmers) {
-    size_t repSeqId = SIZE_T_MAX;
-    size_t lastTargetId = SIZE_T_MAX;
-    seqLenType lastDiagonal=0;
-    int diagonalScore=0;
-    FILE* filePtr = fopen(tmpFile.c_str(), "wb");
-    if(filePtr == NULL) { perror(tmpFile.c_str()); EXIT(EXIT_FAILURE); }
-    unsigned int writeSets = 0;
+void writeKmersToDisk2(std::string tmpFile, KmerPosition<seqLenType> *hashSeqPair, size_t totalKmers, std::vector<size_t>& threadQueryOffsets, int numThreads, std::vector<std::vector<std::string>>& totalFiles) {
     const size_t BUFFER_SIZE = 2048;
-    size_t bufferPos = 0;
-    size_t elemenetCnt = 0;
-    T writeBuffer[BUFFER_SIZE];
-    T nullEntry;
-    nullEntry.seqId=UINT_MAX;
-    nullEntry.diagonal=0;
-    for(size_t kmerPos = 0; kmerPos < totalKmers && hashSeqPair[kmerPos].kmer != SIZE_T_MAX; kmerPos++){
-        size_t currKmer=hashSeqPair[kmerPos].kmer;
-        if(TYPE == Parameters::DBTYPE_NUCLEOTIDES){
-            currKmer = BIT_CLEAR(currKmer, 63);
-        }
-        if(repSeqId != currKmer) {
-            if (writeSets > 0 && elemenetCnt > 0) {
-                if(bufferPos > 0){
-                    fwrite(writeBuffer, sizeof(T), bufferPos, filePtr);
-                }
-                fwrite(&nullEntry, sizeof(T), 1, filePtr);
-            }
-            lastTargetId = SIZE_T_MAX;
-            bufferPos=0;
-            elemenetCnt=0;
-            repSeqId = currKmer;
-            writeBuffer[bufferPos].seqId = repSeqId;
-            writeBuffer[bufferPos].score = 0;
-            writeBuffer[bufferPos].diagonal = 0;
+    #pragma omp parallel num_threads(numThreads)
+    {
+        int tid = omp_get_thread_num();
+        size_t start = threadQueryOffsets[tid];
+        size_t end   = threadQueryOffsets[tid+1];
+
+        size_t repSeqId = SIZE_T_MAX;
+        size_t lastTargetId = SIZE_T_MAX;
+        seqLenType lastDiagonal = 0;
+        int diagonalScore = 0;
+
+        // file per thread
+        std::string tmpFileThread = tmpFile + ".thread" + std::to_string(tid);
+        totalFiles[tid].push_back(tmpFileThread);
+        FILE* filePtr = fopen(tmpFileThread.c_str(), "wb");
+        if(filePtr == NULL) { perror(tmpFileThread.c_str()); EXIT(EXIT_FAILURE); }
+        unsigned int writeSets = 0;
+        size_t bufferPos = 0;
+        size_t elemenetCnt = 0;
+        T writeBuffer[BUFFER_SIZE];
+        T nullEntry;
+        nullEntry.seqId = UINT_MAX;
+        nullEntry.diagonal = 0;
+
+        for(size_t kmerPos = start; kmerPos < end && hashSeqPair[kmerPos].kmer != SIZE_T_MAX; kmerPos++){
+            size_t currKmer = hashSeqPair[kmerPos].kmer;
             if(TYPE == Parameters::DBTYPE_NUCLEOTIDES){
-                bool isReverse = BIT_CHECK(hashSeqPair[kmerPos].kmer, 63)==false;
+                currKmer = BIT_CLEAR(currKmer, 63);
+            }
+
+            if(repSeqId != currKmer){
+                if(writeSets > 0 && elemenetCnt > 0){
+                    if(bufferPos > 0 ){
+                        fwrite(writeBuffer, sizeof(T), bufferPos, filePtr);
+                    }
+                    fwrite(&nullEntry, sizeof(T), 1, filePtr);
+                }
+                lastTargetId = SIZE_T_MAX;
+                bufferPos = 0;
+                elemenetCnt = 0;
+                repSeqId = currKmer;
+
+                writeBuffer[bufferPos].seqId = repSeqId;
+                writeBuffer[bufferPos].score = 0;
+                writeBuffer[bufferPos].diagonal = 0;
+                if(TYPE == Parameters::DBTYPE_NUCLEOTIDES){
+                    bool isReverse = BIT_CHECK(hashSeqPair[kmerPos].kmer, 63)==false;
+                    writeBuffer[bufferPos].setReverse(isReverse);
+                }
+                bufferPos++;
+            }
+
+            unsigned int targetId = hashSeqPair[kmerPos].id;
+            seqLenType diagonal = hashSeqPair[kmerPos].pos;
+
+            int forward = 0, reverse = 0;
+            // find diagonal score
+            do {
+                diagonalScore += (diagonalScore == 0 || (lastTargetId == targetId && lastDiagonal == diagonal));
+                lastTargetId = hashSeqPair[kmerPos].id;
+                lastDiagonal = hashSeqPair[kmerPos].pos;
+                if(TYPE == Parameters::DBTYPE_NUCLEOTIDES){
+                    bool isReverse = BIT_CHECK(hashSeqPair[kmerPos].kmer, 63)==false;
+                    forward += !isReverse;
+                    reverse += isReverse;
+                }
+                kmerPos++;
+            } while(targetId == hashSeqPair[kmerPos].id &&
+                    hashSeqPair[kmerPos].pos == diagonal &&
+                    kmerPos < end && hashSeqPair[kmerPos].kmer != SIZE_T_MAX);
+            kmerPos--;
+
+            elemenetCnt++;
+            writeBuffer[bufferPos].seqId = targetId;
+            writeBuffer[bufferPos].score = diagonalScore;
+            diagonalScore = 0;
+            writeBuffer[bufferPos].diagonal = diagonal;
+            if(TYPE == Parameters::DBTYPE_NUCLEOTIDES){
+                bool isReverse = (reverse>forward)? true : false;
                 writeBuffer[bufferPos].setReverse(isReverse);
             }
             bufferPos++;
-        }
 
-        unsigned int targetId = hashSeqPair[kmerPos].id;
-        seqLenType diagonal = hashSeqPair[kmerPos].pos;
-        int forward = 0;
-        int reverse = 0;
-        // find diagonal score
-        do{
-            diagonalScore += (diagonalScore == 0 || (lastTargetId == targetId && lastDiagonal == diagonal) );
-            lastTargetId = hashSeqPair[kmerPos].id;
-            lastDiagonal = hashSeqPair[kmerPos].pos;
-            if(TYPE == Parameters::DBTYPE_NUCLEOTIDES){
-                bool isReverse  = BIT_CHECK(hashSeqPair[kmerPos].kmer, 63)==false;
-                forward += isReverse == false;
-                reverse += isReverse == true;
+            if(bufferPos >= BUFFER_SIZE){
+                fwrite(writeBuffer, sizeof(T), bufferPos, filePtr);
+                bufferPos = 0;
             }
-            kmerPos++;
-        }while(targetId == hashSeqPair[kmerPos].id && hashSeqPair[kmerPos].pos == diagonal && kmerPos < totalKmers && hashSeqPair[kmerPos].kmer != SIZE_T_MAX);
-        kmerPos--;
+            lastTargetId = targetId;
+            writeSets++;
+        }
 
-        elemenetCnt++;
-        writeBuffer[bufferPos].seqId = targetId;
-        writeBuffer[bufferPos].score = diagonalScore;
-        diagonalScore = 0;
-        writeBuffer[bufferPos].diagonal = diagonal;
-        if(TYPE == Parameters::DBTYPE_NUCLEOTIDES){
-            bool isReverse = (reverse>forward)? true : false;
-            writeBuffer[bufferPos].setReverse(isReverse);
-        }
-        bufferPos++;
-        if(bufferPos >= BUFFER_SIZE){
+        if (writeSets > 0 && elemenetCnt > 0 && bufferPos > 0) {
             fwrite(writeBuffer, sizeof(T), bufferPos, filePtr);
-            bufferPos=0;
+            fwrite(&nullEntry,  sizeof(T), 1, filePtr);
         }
-        lastTargetId = targetId;
-        writeSets++;
-    }
-    if (writeSets > 0 && elemenetCnt > 0 && bufferPos > 0) {
-        fwrite(writeBuffer, sizeof(T), bufferPos, filePtr);
-        fwrite(&nullEntry,  sizeof(T), 1, filePtr);
-    }
-    if (fclose(filePtr) != 0) {
-        Debug(Debug::ERROR) << "Cannot close file " << tmpFile << "\n";
-        EXIT(EXIT_FAILURE);
-    }
-    std::string fileName = tmpFile + ".done";
-    FILE* done = FileUtil::openFileOrDie(fileName.c_str(),"w", false);
-    if (fclose(done) != 0) {
-        Debug(Debug::ERROR) << "Cannot close file " << fileName << "\n";
-        EXIT(EXIT_FAILURE);
-    }
+
+        if(fclose(filePtr) != 0){
+            Debug(Debug::ERROR) << "Cannot close file " << tmpFileThread << "\n";
+            EXIT(EXIT_FAILURE);
+        }
+    } // end parallel region
+
 }
+
 
 
 // template <int TYPE, typename T, typename seqLenType>
@@ -1532,4 +1769,26 @@ template std::vector<std::pair<size_t, size_t>>  setupKmerSplits<int>(Parameters
 
 template <typename T>
 T* KmerPosition<T>::seqkey_to_len = nullptr;
+
+template void writeKmersToDisk<Parameters::DBTYPE_NUCLEOTIDES, KmerEntryRev, short>(std::string tmpFile, KmerPosition<short> *hashSeqPair, size_t totalKmers);
+template void writeKmersToDisk<Parameters::DBTYPE_NUCLEOTIDES, KmerEntryRev, int>(std::string tmpFile, KmerPosition<int> *hashSeqPair, size_t totalKmers);
+template void writeKmersToDisk<Parameters::DBTYPE_AMINO_ACIDS, KmerEntry, short>(std::string tmpFile, KmerPosition<short> *hashSeqPair, size_t totalKmers);
+template void writeKmersToDisk<Parameters::DBTYPE_AMINO_ACIDS, KmerEntry, int>(std::string tmpFile, KmerPosition<int> *hashSeqPair, size_t totalKmers);
+
+template void writeKmersToDisk2<Parameters::DBTYPE_NUCLEOTIDES, KmerEntryRev, short>(std::string tmpFile, KmerPosition<short> *hashSeqPair, size_t totalKmers, std::vector<size_t>& threadQueryOffsets, int numThreads, std::vector<std::vector<std::string>>& totalFiles);
+template void writeKmersToDisk2<Parameters::DBTYPE_NUCLEOTIDES, KmerEntryRev, int>(std::string tmpFile, KmerPosition<int> *hashSeqPair, size_t totalKmers, std::vector<size_t>& threadQueryOffsets, int numThreads, std::vector<std::vector<std::string>>& totalFiles);
+template void writeKmersToDisk2<Parameters::DBTYPE_AMINO_ACIDS, KmerEntry, short>(std::string tmpFile, KmerPosition<short> *hashSeqPair, size_t totalKmers, std::vector<size_t>& threadQueryOffsets, int numThreads, std::vector<std::vector<std::string>>& totalFiles);
+template void writeKmersToDisk2<Parameters::DBTYPE_AMINO_ACIDS, KmerEntry, int>(std::string tmpFile, KmerPosition<int> *hashSeqPair, size_t totalKmers, std::vector<size_t>& threadQueryOffsets, int numThreads, std::vector<std::vector<std::string>>& totalFiles);
+
+
+template void mergeKmerFilesAndOutput<Parameters::DBTYPE_NUCLEOTIDES, KmerEntryRev>(DBWriter & dbw, std::vector<std::string> tmpFiles, std::vector<char> &repSequence);
+template void mergeKmerFilesAndOutput<Parameters::DBTYPE_AMINO_ACIDS, KmerEntry>(DBWriter & dbw, std::vector<std::string> tmpFiles, std::vector<char> &repSequence);
+
+template void mergeKmerFilesAndOutput2<Parameters::DBTYPE_NUCLEOTIDES, KmerEntryRev>(DBWriter & dbw,
+                             std::vector<std::vector<std::string>>& tmpFiles,
+                             std::vector<char> &repSequence, int numThreads);
+template void mergeKmerFilesAndOutput2<Parameters::DBTYPE_AMINO_ACIDS, KmerEntry>(DBWriter & dbw,
+                                std::vector<std::vector<std::string>>& tmpFiles,
+                                std::vector<char> &repSequence, int numThreads);
+
 #undef SIZE_T_MAX
