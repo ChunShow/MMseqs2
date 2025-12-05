@@ -221,7 +221,6 @@ void ClusteringAlgorithms::initClustersizes(){
     delete [] setsize_abundance;
     delete [] clusterid_to_arrayposition;
     delete [] borders_of_set;
-    delete [] sorted_clustersizes;
 }
 
 
@@ -332,6 +331,7 @@ void ClusteringAlgorithms::setCoverStatic(unsigned int **elementLookupTable, uns
             }
         }
     }
+    delete [] sorted_clustersizes;
 }
 
 

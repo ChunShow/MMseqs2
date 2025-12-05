@@ -49,9 +49,30 @@ struct SequencePosition{
     }
 };
 
+template <bool Include>
+struct AdjacentSeqArray {
+    void setAdjacentSeq(int index, const unsigned char val) {
+        _adjacentSeq[index] = val;
+    }
+    unsigned char getAdjacentSeq(int index) {
+        return _adjacentSeq[index];
+    }
 
-template <typename T>
-struct __attribute__((__packed__))KmerPosition {
+    unsigned char _adjacentSeq[6];
+};
+
+// save memory when adjacent sequence is unused
+template <>
+struct AdjacentSeqArray<false> {
+    void setAdjacentSeq(const int, const unsigned char) {};
+    unsigned char getAdjacentSeq(int) {
+        Debug(Debug::ERROR) << "Invalid read attempt at adjacent sequence array";
+        return '\0';
+    }
+};
+
+template <typename T, bool IncludeAdjacentSeq = false>
+struct __attribute__((__packed__))KmerPosition : public AdjacentSeqArray<IncludeAdjacentSeq> {
     size_t kmer;
     unsigned int id;
     T pos;
@@ -63,7 +84,7 @@ struct __attribute__((__packed__))KmerPosition {
     KmerPosition(size_t kmer, unsigned int id, T pos)
         : kmer(kmer), id(id), pos(pos) {}
 
-    static bool compareRepSequenceAndIdAndPos(const KmerPosition<T> &first, const KmerPosition<T> &second){
+    static bool compareRepSequenceAndIdAndPos(const KmerPosition<T, IncludeAdjacentSeq> &first, const KmerPosition<T, IncludeAdjacentSeq> &second){
         if(first.kmer < second.kmer )
             return true;
         if(second.kmer < first.kmer )
@@ -86,7 +107,7 @@ struct __attribute__((__packed__))KmerPosition {
         return false;
     }
 
-    static bool compareRepSequenceAndIdAndPosReverse(const KmerPosition<T> &first, const KmerPosition<T> &second){
+    static bool compareRepSequenceAndIdAndPosReverse(const KmerPosition<T, IncludeAdjacentSeq> &first, const KmerPosition<T, IncludeAdjacentSeq> &second){
         size_t firstKmer  = BIT_SET(first.kmer, 63);
         size_t secondKmer = BIT_SET(second.kmer, 63);
         if(firstKmer < secondKmer )
@@ -111,7 +132,7 @@ struct __attribute__((__packed__))KmerPosition {
         return false;
     }
 
-    static bool compareRepSequenceAndIdAndDiagReverse(const KmerPosition<T> &first, const KmerPosition<T> &second){
+    static bool compareRepSequenceAndIdAndDiagReverse(const KmerPosition<T, IncludeAdjacentSeq> &first, const KmerPosition<T, IncludeAdjacentSeq> &second){
         size_t firstKmer  = BIT_SET(first.kmer, 63);
         size_t secondKmer = BIT_SET(second.kmer, 63);
         if(firstKmer < secondKmer)
@@ -129,7 +150,7 @@ struct __attribute__((__packed__))KmerPosition {
         return false;
     }
 
-    static bool compareRepSequenceAndIdAndDiag(const KmerPosition<T> &first, const KmerPosition<T> &second){
+    static bool compareRepSequenceAndIdAndDiag(const KmerPosition<T, IncludeAdjacentSeq> &first, const KmerPosition<T, IncludeAdjacentSeq> &second){
         if(first.kmer < second.kmer)
             return true;
         if(second.kmer < first.kmer)
@@ -206,8 +227,8 @@ public:
 };
 
 
-template  <int TYPE, typename T>
-size_t assignGroup(KmerPosition<T> *kmers, KmerPosition<T> *writeKmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, int threads);
+template  <int TYPE, typename T, bool IncludeAdjacentSeq = false>
+size_t assignGroup(int mode, KmerPosition<T, IncludeAdjacentSeq> *kmers, KmerPosition<T, IncludeAdjacentSeq> *writeKmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, int threads, int dbKeySize, std::vector<size_t>& threadOffsets, BaseMatrix *subMat);
 
 template <int TYPE, typename T>
 void mergeKmerFilesAndOutput2(DBWriter & dbw, std::vector<std::vector<std::string>>& tmpFiles, std::vector<char> &repSequence, int threads);
@@ -222,29 +243,30 @@ size_t queueNextEntry(KmerPositionQueue &queue, int file, size_t offsetPos, T *e
 
 void setKmerLengthAndAlphabet(Parameters &parameters, size_t aaDbSize, int seqType);
 
-template <int TYPE, typename T, typename seqLenType>
-void writeKmersToDisk(std::string tmpFile, KmerPosition<seqLenType> *kmers, size_t totalKmers);
+// template <int TYPE, typename T, typename seqLenType, bool IncludeAdjacentSeq = false>
+// void doComputation(std::string tmpFile, KmerPosition<seqLenType, false> *kmers, size_t totalKmers);
+template <int TYPE, typename T, typename seqLenType, bool IncludeAdjacentSeq = false>
+void writeKmersToDisk(std::string tmpFile, KmerPosition<seqLenType, false> *hashSeqPair, size_t totalKmers) ;
 
-template <int TYPE, typename T, typename seqLenType>
-void writeKmersToDisk2(std::string tmpFile, KmerPosition<seqLenType> *hashSeqPair, size_t totalKmers, std::vector<size_t>& threadQueryOffsets, int numThreads, std::vector<std::vector<std::string>>& totalFiles);
+template <int TYPE, typename T, typename seqLenType, bool IncludeAdjacentSeq = false>
+void writeKmersToDisk2(std::string tmpFile, int iteration, KmerPosition<seqLenType, false> *hashSeqPair, size_t totalKmers, std::vector<size_t>& threadQueryOffsets, int numThreads, std::vector<std::vector<std::string>>& totalFiles);
  
 
-template <int TYPE, typename T>
-void writeKmerMatcherResult(DBWriter & dbw, KmerPosition<T> *hashSeqPair, size_t totalKmers,
+
+template <int TYPE, typename T, bool IncludeAdjacentSeq = false>
+void writeKmerMatcherResult(DBWriter & dbw, KmerPosition<T, IncludeAdjacentSeq> *hashSeqPair, size_t totalKmers,
                             std::vector<char> &repSequence, size_t threads);
 
-
-
-
-template <typename T>
-KmerPosition<T> * doComputation(size_t totalKmers, size_t split, size_t splits, std::string splitFile,
+template <typename T, bool IncludeAdjacentSeq = false>
+void doComputation(size_t totalKmers, size_t split, size_t splits, std::string splitFile,
                                 DBReader<unsigned int> & seqDbr, Parameters & par, BaseMatrix  * subMat, std::vector<std::vector<std::string>>& totalFiles,
                                 size_t KMER_SIZE, size_t chooseTopKmer, float chooseTopKmerScale = 0.0);
-template <typename T>
-KmerPosition<T> *initKmerPositionMemory(size_t size);
+                                
+template <typename T, bool IncludeAdjacentSeq = false>
+KmerPosition<T, IncludeAdjacentSeq> *initKmerPositionMemory(size_t size);
 
-template <int TYPE, typename T>
-std::pair<size_t, size_t>  fillKmerPositionArray(KmerPosition<T> * kmerArray, size_t kmerArraySize, DBReader<unsigned int> &seqDbr,
+template <int TYPE, typename T, bool IncludeAdjacentSeq = false>
+std::pair<size_t, size_t>  fillKmerPositionArray(KmerPosition<T, IncludeAdjacentSeq> * kmerArray, size_t kmerArraySize, DBReader<unsigned int> &seqDbr,
                                                  Parameters & par, BaseMatrix * subMat, bool hashWholeSequence,
                                                  size_t hashStartRange, size_t hashEndRange, size_t * hashDistribution);
 
@@ -252,10 +274,10 @@ std::pair<size_t, size_t>  fillKmerPositionArray(KmerPosition<T> * kmerArray, si
 void maskSequence(int maskMode, int maskLowerCase,
                   Sequence &seq, int maskLetter, ProbabilityMatrix * probMatrix);
 
-template <typename T>
+template <typename T, bool IncludeAdjacentSeq = false>
 size_t computeMemoryNeededLinearfilter(size_t totalKmer);
 
-template <typename T>
+template <typename T, bool IncludeAdjacentSeq = true>
 std::vector<std::pair<size_t, size_t>> setupKmerSplits(Parameters &par, BaseMatrix * subMat, DBReader<unsigned int> &seqDbr, size_t totalKmers, size_t splits);
 
 size_t computeKmerCount(DBReader<unsigned int> &reader, size_t KMER_SIZE, size_t chooseTopKmer,
@@ -263,7 +285,6 @@ size_t computeKmerCount(DBReader<unsigned int> &reader, size_t KMER_SIZE, size_t
 
 void setLinearFilterDefault(Parameters *p);
 
-size_t computeMemoryNeededLinearfilter(size_t totalKmer);
 
 
 #undef SIZE_T_MAX
