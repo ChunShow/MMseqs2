@@ -90,8 +90,8 @@ struct __attribute__((__packed__))KmerPosition : public AdjacentSeqArray<Include
         if(second.kmer < first.kmer )
             return false;
 
-        size_t len1 = seqkey_to_len[first.id];
-        size_t len2 = seqkey_to_len[second.id];
+        T len1 = seqkey_to_len[first.id];
+        T len2 = seqkey_to_len[second.id];
     
         if (len1 > len2) return true;   
         if (len2 > len1) return false;
@@ -228,7 +228,7 @@ public:
 
 
 template  <int TYPE, typename T, bool IncludeAdjacentSeq = false>
-size_t assignGroup(int mode, KmerPosition<T, IncludeAdjacentSeq> *kmers, KmerPosition<T, IncludeAdjacentSeq> *writeKmers, size_t splitKmerCount, bool includeOnlyExtendable, int covMode, float covThr, int threads, int dbKeySize, std::vector<size_t>& threadOffsets, BaseMatrix *subMat);
+size_t assignGroup(int mode, KmerPosition<T, IncludeAdjacentSeq> *kmers, KmerPosition<T, false> *writeKmers, bool includeOnlyExtendable, int covMode, float covThr, int threads, std::vector<size_t>& threadOffsets, BaseMatrix *subMat);
 
 template <int TYPE, typename T>
 void mergeKmerFilesAndOutput2(DBWriter & dbw, std::vector<std::vector<std::string>>& tmpFiles, std::vector<char> &repSequence, int threads);

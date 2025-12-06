@@ -582,9 +582,10 @@ public:
     float weightThr;
     std::string weightFile;
     bool includeCountTable;
+    int numIterCountTable;
     float countTableScale;
-    bool useCountTable;
     bool includeAdjacentSeq;
+    int numIterAdjacentSeq;
     float extraMemoryScale;
 
     // indexdb
@@ -939,6 +940,10 @@ public:
     PARAMETER(PARAM_RESULT_DIRECTION)
     PARAMETER(PARAM_WEIGHT_FILE)
     PARAMETER(PARAM_WEIGHT_THR)
+    PARAMETER(PARAM_INCLUDE_COUNTTABLE)
+    PARAMETER(PARAM_NUM_COUNTS)
+    PARAMETER(PARAM_INCLUDE_ADJSEQ)
+    PARAMETER(PARAM_NUM_ADJSEQ)
 
     // workflow
     PARAMETER(PARAM_RUNNER)

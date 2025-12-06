@@ -179,13 +179,14 @@ int doalignblock(Parameters &par,
                     bool hasCov = false;
                     bool hasSeqId = false;
                     std::string backtrace = "";
+                    
                     // 0. run hamming alignment
                     if (par.skipHamming == false){
                         BlockAligner::UngappedAln_res hamming_aln = blockaligner.hammingDistance(&target, prefRes[element].diagonal); 
                         double seqId = Util::computeSeqId(par.seqIdMode, static_cast<float>(hamming_aln.score), query.L, targetLen, hamming_aln.diagonalLen);
                         bool hasAlnLen = (hamming_aln.alnLen >= par.alnLenThr);
-                        float hammingCovThr = std::max(0.5f, par.covThr);
-                        float hammingSeqIdThr = std::max(0.5f, par.seqIdThr);
+                        float hammingCovThr = std::max(0.5f, std::min(par.covThr + 0.2f, 1.0f));
+                        float hammingSeqIdThr = std::max(0.5f, std::min(par.seqIdThr + 0.2f, 1.0f));
                         bool hasCov = Util::hasCoverage(hammingCovThr, par.covMode, hamming_aln.qcov, hamming_aln.tcov);
                         bool hasSeqId = seqId >= (hammingSeqIdThr - std::numeric_limits<float>::epsilon());
                         if (hasAlnLen && hasCov && hasSeqId) {
@@ -196,9 +197,6 @@ int doalignblock(Parameters &par,
                             continue;
                         }
                     }
-                    
-                    
-                    
                     // 1. run ungapped alignment
                     BlockAligner::UngappedAln_res ungapped_aln = blockaligner.ungappedAlign(&target, prefRes[element].diagonal); 
                     //check ungapped criteria
@@ -245,6 +243,7 @@ int doalignblock(Parameters &par,
                     if (currScorePerCol < scorePerColThr) { // if fail score per column threshold, skip
                         continue;
                     } 
+                    
                     // 2-2. Run gapped alignment
                     // find seed point from mid
                     int alnLen = ungapped_aln.alnLen;

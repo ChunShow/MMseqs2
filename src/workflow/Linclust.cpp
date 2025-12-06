@@ -16,7 +16,8 @@ void setLinclustWorkflowDefaults(Parameters *p) {
     p->evalThr = 0.001;
     p->seqIdThr = 0.9;
     p->alignmentMode = Parameters::ALIGNMENT_MODE_SCORE_COV_SEQID; // use alignment mode 3 in linclust2
-    p->skipHamming = true;
+    p->skipHamming = false;
+    p->kmersPerSequenceScale = 0.05;
 }
 
 int linclust(int argc, const char **argv, const Command& command) {
@@ -50,6 +51,7 @@ int linclust(int argc, const char **argv, const Command& command) {
     bool kmerSizeWasSet = false;
     bool alphabetSizeWasSet = false;
     bool clusterModeSet = false;
+    bool includeCountTableSet = false;
     for (size_t i = 0; i < par.linclustworkflow.size(); i++) {
         if (par.linclustworkflow[i]->uniqid == par.PARAM_K.uniqid && par.linclustworkflow[i]->wasSet) {
             kmerSizeWasSet = true;
@@ -60,6 +62,10 @@ int linclust(int argc, const char **argv, const Command& command) {
         if (par.linclustworkflow[i]->uniqid == par.PARAM_CLUSTER_MODE.uniqid && par.linclustworkflow[i]->wasSet) {
             clusterModeSet = true;
         }
+        if (par.linclustworkflow[i]->uniqid == par.PARAM_INCLUDE_COUNTTABLE.uniqid && par.linclustworkflow[i]->wasSet) {
+            includeCountTableSet = true;
+        }
+
     }
 
     const bool nonSymetric = (par.covMode == Parameters::COV_MODE_TARGET || par.covMode == Parameters::COV_MODE_QUERY);
@@ -67,12 +73,18 @@ int linclust(int argc, const char **argv, const Command& command) {
         if (nonSymetric) {
             par.clusteringMode = Parameters::GREEDY_MEM;
         } else {
-            par.clusteringMode = Parameters::SET_COVER;
+            par.clusteringMode = Parameters::SET_COVER_STATIC;
         }
-        std::string cluMode = (par.clusteringMode==Parameters::GREEDY_MEM) ? "GREEDY MEM" : "SET COVER";
-        Debug(Debug::INFO) << "Set cluster mode " << cluMode << ".\n";
+        std::string cluMode = (par.clusteringMode==Parameters::GREEDY_MEM) ? "GREEDY MEM" : "SET COVER STATIC";
     }
-
+    if (includeCountTableSet == false) {
+        if (nonSymetric) {
+            par.includeCountTable = false;
+        } else {
+            par.includeCountTable = true;
+        }
+    }
+    
     if (kmerSizeWasSet == false) {
         par.kmerSize = Parameters::CLUST_LINEAR_DEFAULT_K;
     }
