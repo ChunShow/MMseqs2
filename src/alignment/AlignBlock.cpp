@@ -26,13 +26,12 @@
 #define MIN_SIZE 32
 
 struct ClusterResult {
-    unsigned int sequenceId;
+    unsigned int sequenceIdx;
     size_t representativeId;
     std::vector<unsigned int> memberIds;
-    bool isValid;
 
     bool operator<(const ClusterResult& other) const {
-        return sequenceId > other.sequenceId;
+        return sequenceIdx > other.sequenceIdx;
     }
 };
 
@@ -106,7 +105,7 @@ void clusterThreadFunc(unsigned int* assignedCluster) {
         std::unique_lock<std::mutex> lock(clusterMutex);
         
         clusterCondition.wait(lock, [] { 
-            return (!clusterResultQueue.empty() && clusterResultQueue.top().sequenceId == currentProcessPosition) 
+            return (!clusterResultQueue.empty() && clusterResultQueue.top().sequenceIdx == currentProcessPosition) 
                    || allCalculationsDone; 
         });
 
@@ -114,26 +113,15 @@ void clusterThreadFunc(unsigned int* assignedCluster) {
             break;
         }
 
-        while (!clusterResultQueue.empty() && clusterResultQueue.top().sequenceId == currentProcessPosition) {
+        while (!clusterResultQueue.empty() && clusterResultQueue.top().sequenceIdx == currentProcessPosition) {
             ClusterResult result = std::move(const_cast<ClusterResult&>(clusterResultQueue.top()));
             clusterResultQueue.pop();
-
-            if (!result.isValid) {
-                currentProcessPosition++;
-                continue;
-            }
             
             if (assignedCluster[result.representativeId] != UINT_MAX) {
                 currentProcessPosition++;
                 continue;  
             }
-            
-            unsigned int representativeId = result.memberIds[0];
-            if (result.memberIds.size() <= 1 || assignedCluster[representativeId] != UINT_MAX) {
-                currentProcessPosition++;
-                continue;
-            }
-            
+                        
             std::vector<unsigned int> validMemberIds;
             for (size_t i = 0; i < result.memberIds.size(); i++) {
                 unsigned int memberId = result.memberIds[i];
@@ -148,7 +136,7 @@ void clusterThreadFunc(unsigned int* assignedCluster) {
             }
             
             for (size_t i = 0; i < validMemberIds.size(); i++) {
-                assignedCluster[validMemberIds[i]] = representativeId;
+                assignedCluster[validMemberIds[i]] = result.representativeId;
             }
             
             currentProcessPosition++;
@@ -211,7 +199,7 @@ int doAlign2clust(Parameters &par, DBWriter &resultWriter, DBReader<unsigned int
 #pragma omp for schedule(dynamic, 1) nowait
         for (size_t i = 0; i < alnDbr.getSize(); i++) {
             ClusterResult clusterResult;
-            clusterResult.sequenceId = i;
+            clusterResult.sequenceIdx = i;
             targetsWithDiagonal.clear();
             
             const unsigned int queryKey = seqDbr->getDbKey(i);
@@ -222,22 +210,11 @@ int doAlign2clust(Parameters &par, DBWriter &resultWriter, DBReader<unsigned int
             clusterResult.representativeId = representativeId;
             
             if (assignedCluster[representativeId] != UINT_MAX) {
-                bool isNextPosition = false;
                 {
                     std::lock_guard<std::mutex> lock(clusterMutex);
-                    if (clusterResult.sequenceId == currentProcessPosition) {
-                        isNextPosition = true;
-                    }
-                    clusterResult.memberIds.push_back(UINT_MAX);
                     clusterResultQueue.push(std::move(clusterResult));
                 }
                 continue;
-            }
-            
-            clusterResult.isValid = true;
-            
-            if (assignedCluster[representativeId] != UINT_MAX) {
-                clusterResult.isValid = false;
             }
 
             char *querySequence = seqDbr->getData(queryId, threadIdx);
@@ -367,7 +344,7 @@ int doAlign2clust(Parameters &par, DBWriter &resultWriter, DBReader<unsigned int
             bool isNextPosition = false;
             {
                 std::lock_guard<std::mutex> lock(clusterMutex);
-                if (clusterResult.sequenceId == currentProcessPosition) {
+                if (clusterResult.sequenceIdx == currentProcessPosition) {
                     isNextPosition = true;
                 }
                 clusterResultQueue.push(std::move(clusterResult));
