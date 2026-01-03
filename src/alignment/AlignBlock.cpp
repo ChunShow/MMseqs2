@@ -6,9 +6,6 @@
 #include "DBReader.h"
 #include "DBWriter.h"
 #include "QueryMatcher.h"
-// #include "CovSeqidQscPercMinDiag.lib.h"
-// #include "CovSeqidQscPercMinDiagTargetCov.lib.h"
-#include "QueryMatcher.h"
 #include "IndexReader.h"
 #include "FastSort.h"
 #include "BlockAligner.h"
@@ -17,6 +14,10 @@
 
 #ifdef OPENMP
 #include <omp.h>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <queue>
 #endif
 
 #include <set>  
@@ -24,24 +25,31 @@
 #define MAX_SIZE 4096
 #define MIN_SIZE 32
 
-// Result buffer structure
 struct ClusterResult {
+    unsigned int sequenceId;
+    size_t representativeId;
     std::vector<unsigned int> memberIds;
     bool isValid;
-    
-    ClusterResult() : isValid(false) {}
+
+    bool operator<(const ClusterResult& other) const {
+        return sequenceId > other.sequenceId;
+    }
 };
 
+static std::mutex clusterMutex;
+static std::condition_variable clusterCondition;
+static std::priority_queue<ClusterResult> clusterResultQueue;
+static unsigned int currentProcessPosition = 0; 
+static bool allCalculationsDone = false;
 
 static float parsePrecisionLib(const std::string &scoreFile, double targetSeqid, double targetCov, double targetPrecision) {
     std::stringstream in(scoreFile);
     std::string line;
-    // find closest lower seq. id in a grid of size 5
     int intTargetSeqid = static_cast<int>((targetSeqid + 0.0001) * 100);
     int seqIdRest = (intTargetSeqid % 5);
     targetSeqid = static_cast<float>(intTargetSeqid - seqIdRest) / 100;
-    // find closest lower cov. id in a grid of size 10
     targetCov = static_cast<float>(static_cast<int>((targetCov + 0.0001) * 10)) / 10;
+    
     while (std::getline(in, line)) {
         std::vector<std::string> values = Util::split(line, " ");
         float cov = strtod(values[0].c_str(), NULL);
@@ -52,338 +60,374 @@ static float parsePrecisionLib(const std::string &scoreFile, double targetSeqid,
             return scorePerCol;
         }
     }
+    
     Debug(Debug::WARNING) << "Can not find any score per column for coverage "
-                          << targetCov << " and sequence identity " << targetSeqid << ". No hit will be filtered.\n";
-
+                          << targetCov << " and sequence identity " << targetSeqid 
+                          << ". No hit will be filtered.\n";
     return 0;
 }
 
-static void writeData(DBWriter *dbw, const std::pair<unsigned int, unsigned int> * ret, size_t dbSize) {
-    std::string resultStr;
-    resultStr.reserve(1024*1024*1024);
+static void writeData(DBWriter *dbWriter, const std::pair<unsigned int, unsigned int> * results, size_t dbSize) {
+    std::string resultString;
+    resultString.reserve(1024 * 1024 * 1024);
     char buffer[32];
-    unsigned int prevRepresentativeKey = UINT_MAX;
-    for(size_t i = 0; i < dbSize; i++){
-        unsigned int currRepresentativeKey = ret[i].first;
-        // write query key first
-        if(prevRepresentativeKey != currRepresentativeKey) {
-            if(prevRepresentativeKey != UINT_MAX){ // skip first
-                dbw->writeData(resultStr.c_str(), resultStr.length(), prevRepresentativeKey);
+    unsigned int previousRepresentativeKey = UINT_MAX;
+    
+    for (size_t i = 0; i < dbSize; i++) {
+        unsigned int currentRepresentativeKey = results[i].first;
+        
+        if (previousRepresentativeKey != currentRepresentativeKey) {
+            if (previousRepresentativeKey != UINT_MAX) {
+                dbWriter->writeData(resultString.c_str(), resultString.length(), previousRepresentativeKey);
             }
-            resultStr.clear();
-            char *outpos = Itoa::u32toa_sse2(currRepresentativeKey, buffer);
-            resultStr.append(buffer, (outpos - buffer - 1));
-            resultStr.push_back('\n');
+            resultString.clear();
+            char *outPos = Itoa::u32toa_sse2(currentRepresentativeKey, buffer);
+            resultString.append(buffer, (outPos - buffer - 1));
+            resultString.push_back('\n');
         }
-        unsigned int memberKey = ret[i].second;
-        if(memberKey != currRepresentativeKey){
-            char * outpos = Itoa::u32toa_sse2(memberKey, buffer);
-            resultStr.append(buffer, (outpos - buffer - 1) );
-            resultStr.push_back('\n');
+        
+        unsigned int memberKey = results[i].second;
+        if (memberKey != currentRepresentativeKey) {
+            char *outPos = Itoa::u32toa_sse2(memberKey, buffer);
+            resultString.append(buffer, (outPos - buffer - 1));
+            resultString.push_back('\n');
         }
-
-        prevRepresentativeKey = currRepresentativeKey;
+        
+        previousRepresentativeKey = currentRepresentativeKey;
     }
-    if(prevRepresentativeKey != UINT_MAX){
-        dbw->writeData(resultStr.c_str(), resultStr.length(), prevRepresentativeKey);
+    
+    if (previousRepresentativeKey != UINT_MAX) {
+        dbWriter->writeData(resultString.c_str(), resultString.length(), previousRepresentativeKey);
     }
 }
 
-int doAlign2clust(Parameters &par,
-    DBWriter &resultWriter,
-    DBReader<unsigned int> &alnDbr,
-    const size_t dbFrom, const size_t dbSize) {
-    DBReader<unsigned int> * seqDbr = new DBReader<unsigned int>(par.db1.c_str(), par.db1Index.c_str(), par.threads, DBReader<unsigned int>::USE_DATA|DBReader<unsigned int>::USE_INDEX);
+void clusterThreadFunc(unsigned int* assignedCluster) {
+    while (true) {
+        std::unique_lock<std::mutex> lock(clusterMutex);
+        
+        clusterCondition.wait(lock, [] { 
+            return (!clusterResultQueue.empty() && clusterResultQueue.top().sequenceId == currentProcessPosition) 
+                   || allCalculationsDone; 
+        });
+
+        if (allCalculationsDone && clusterResultQueue.empty()) {
+            break;
+        }
+
+        while (!clusterResultQueue.empty() && clusterResultQueue.top().sequenceId == currentProcessPosition) {
+            ClusterResult result = std::move(const_cast<ClusterResult&>(clusterResultQueue.top()));
+            clusterResultQueue.pop();
+
+            if (!result.isValid) {
+                currentProcessPosition++;
+                continue;
+            }
+            
+            if (assignedCluster[result.representativeId] != UINT_MAX) {
+                currentProcessPosition++;
+                continue;  
+            }
+            
+            unsigned int representativeId = result.memberIds[0];
+            if (result.memberIds.size() <= 1 || assignedCluster[representativeId] != UINT_MAX) {
+                currentProcessPosition++;
+                continue;
+            }
+            
+            std::vector<unsigned int> validMemberIds;
+            for (size_t i = 0; i < result.memberIds.size(); i++) {
+                unsigned int memberId = result.memberIds[i];
+                if (assignedCluster[memberId] == UINT_MAX) {
+                    validMemberIds.push_back(memberId);
+                }
+            }
+            
+            if (validMemberIds.size() <= 1) {
+                currentProcessPosition++;
+                continue;
+            }
+            
+            for (size_t i = 0; i < validMemberIds.size(); i++) {
+                assignedCluster[validMemberIds[i]] = representativeId;
+            }
+            
+            currentProcessPosition++;
+        }
+    }
+}
+
+int doAlign2clust(Parameters &par, DBWriter &resultWriter, DBReader<unsigned int> &alnDbr, 
+                  const size_t dbFrom, const size_t dbSize) {
+    DBReader<unsigned int> *seqDbr = new DBReader<unsigned int>(
+        par.db1.c_str(), par.db1Index.c_str(), par.threads, 
+        DBReader<unsigned int>::USE_DATA | DBReader<unsigned int>::USE_INDEX
+    );
     seqDbr->open(DBReader<unsigned int>::SORT_BY_LENGTH);
 
-    BaseMatrix *subMat;
-    subMat = new SubstitutionMatrix(par.scoringMatrixFile.values.aminoacid().c_str(), 2.0, 0.0);
+    BaseMatrix *subMat = new SubstitutionMatrix(
+        par.scoringMatrixFile.values.aminoacid().c_str(), 2.0, 0.0
+    );
     SubstitutionMatrix::FastMatrix fastMatrix = SubstitutionMatrix::createAsciiSubMat(*subMat);
 
     int gapOpen = par.gapOpen.values.aminoacid();
     int gapExtend = par.gapExtend.values.aminoacid();
     unsigned int swMode = Alignment::initSWMode(par.alignmentMode, par.covThr, par.seqIdThr);
 
-    float scorePerColThr = 0.0;
     std::string libraryString = (par.covMode == Parameters::COV_MODE_BIDIRECTIONAL)
                                     ? getCovSeqidQscPercMinDiag()
                                     : getCovSeqidQscPercMinDiagTargetCov();
                                     
-    scorePerColThr = parsePrecisionLib(libraryString, par.seqIdThr, par.covThr, 0.99);
-    std::cout << "Score per column threshold for filtering: " << scorePerColThr << std::endl;
+    float scorePerColThreshold = parsePrecisionLib(libraryString, par.seqIdThr, par.covThr, 0.99);
+    Debug(Debug::INFO) << "Score per column threshold for filtering: " << scorePerColThreshold << "\n";
+    
     EvalueComputation evaluer(seqDbr->getAminoAcidDBSize(), subMat);
-    int32_t x_drop = (MIN_SIZE * par.gapExtend.values.aminoacid() + par.gapOpen.values.aminoacid());
+    int32_t xDrop = (MIN_SIZE * par.gapExtend.values.aminoacid() + par.gapOpen.values.aminoacid());
     
-    // Setup linear data
-    unsigned int *assignedcluster = new(std::nothrow) unsigned int[dbSize];
-    Util::checkAllocation(assignedcluster, "Can not allocate assignedcluster memory in Align2Clust");
-    std::fill_n(assignedcluster, dbSize, UINT_MAX);
+    unsigned int *assignedCluster = new(std::nothrow) unsigned int[dbSize];
+    Util::checkAllocation(assignedCluster, "Can not allocate assignedCluster memory in Align2Clust");
+    std::fill_n(assignedCluster, dbSize, UINT_MAX);
 
-
-    // Determine optimal chunk size based on dataset size
-    size_t totalItems = alnDbr.getSize();
-    size_t numThreads = static_cast<size_t>(par.threads);
-
-    // 총 항목의 일정 비율을 청크로 설정 (예: 1-5%)
-    double chunkRatio = 0.02; // 2%
-    size_t chunkSize = std::max(
-        static_cast<size_t>(totalItems * chunkRatio),
-        numThreads * 10
-    );
+    std::thread clusterThread(clusterThreadFunc, assignedCluster);
     
-    std::cout << "Using chunk size: " << chunkSize << " for " << totalItems << " items with " << par.threads << " threads" << std::endl;
-    
-    // Allocate result buffer for one chunk
-    std::vector<ClusterResult> resultBuffer(chunkSize);
-
 #pragma omp parallel
     {
-        unsigned int thread_idx = 0;
+        unsigned int threadIdx = 0;
 #ifdef OPENMP
-        thread_idx = (unsigned int) omp_get_thread_num();
+        threadIdx = (unsigned int) omp_get_thread_num();
 #endif
-        Matcher matcher(Parameters::DBTYPE_AMINO_ACIDS, par.maxSeqLen, subMat, &evaluer, par.compBiasCorrection, par.compBiasCorrectionScale, par.gapOpen.values.aminoacid(), par.gapExtend.values.aminoacid(), 0.0, par.zdrop);
+        Matcher matcher(Parameters::DBTYPE_AMINO_ACIDS, par.maxSeqLen, subMat, &evaluer, 
+                       par.compBiasCorrection, par.compBiasCorrectionScale, 
+                       par.gapOpen.values.aminoacid(), par.gapExtend.values.aminoacid(), 
+                       0.0, par.zdrop);
         Sequence query(par.maxSeqLen, Parameters::DBTYPE_AMINO_ACIDS, subMat, 0, false, par.compBiasCorrection);
         Sequence target(par.maxSeqLen, Parameters::DBTYPE_AMINO_ACIDS, subMat, 0, false, par.compBiasCorrection);
-        BlockAligner blockaligner(Parameters::DBTYPE_AMINO_ACIDS, par.maxSeqLen, subMat, &fastMatrix, &evaluer, par.compBiasCorrection, par.compBiasCorrectionScale, -par.gapOpen.values.aminoacid(), -par.gapExtend.values.aminoacid());
-        char buffer[1024 + 32768*4];
-        std::vector<std::pair<unsigned int, unsigned short>> dbKeysNdiagonal;
-        dbKeysNdiagonal.reserve(1000); // Pre-allocate
+        BlockAligner blockAligner(Parameters::DBTYPE_AMINO_ACIDS, par.maxSeqLen, subMat, &fastMatrix, 
+                                 &evaluer, par.compBiasCorrection, par.compBiasCorrectionScale, 
+                                 -par.gapOpen.values.aminoacid(), -par.gapExtend.values.aminoacid());
+        char buffer[1024 + 32768 * 4];
+        std::vector<std::pair<unsigned int, unsigned short>> targetsWithDiagonal;
+        targetsWithDiagonal.reserve(1000);
 
-        for (size_t chunkStart = 0; chunkStart < alnDbr.getSize(); chunkStart += chunkSize) {
-            size_t chunkEnd = std::min(chunkStart + chunkSize, alnDbr.getSize());
-            size_t availChunkSize = chunkEnd - chunkStart;
-            
-            // Parallel processing with dynamic scheduling and nowait
 #pragma omp for schedule(dynamic, 1) nowait
-            for (size_t i = chunkStart; i < chunkEnd; i++) {
-                size_t bufferIdx = i - chunkStart;
+        for (size_t i = 0; i < alnDbr.getSize(); i++) {
+            ClusterResult clusterResult;
+            clusterResult.sequenceId = i;
+            targetsWithDiagonal.clear();
+            
+            const unsigned int queryKey = seqDbr->getDbKey(i);
+            const size_t alignmentId = alnDbr.getId(queryKey);
+            char *alignmentData = alnDbr.getData(alignmentId, threadIdx);
+            size_t representativeId = seqDbr->getId(queryKey);
+            size_t queryId = representativeId;
+            clusterResult.representativeId = representativeId;
+            
+            if (assignedCluster[representativeId] != UINT_MAX) {
+                bool isNextPosition = false;
+                {
+                    std::lock_guard<std::mutex> lock(clusterMutex);
+                    if (clusterResult.sequenceId == currentProcessPosition) {
+                        isNextPosition = true;
+                    }
+                    clusterResult.memberIds.push_back(UINT_MAX);
+                    clusterResultQueue.push(std::move(clusterResult));
+                }
+                continue;
+            }
+            
+            clusterResult.isValid = true;
+            
+            if (assignedCluster[representativeId] != UINT_MAX) {
+                clusterResult.isValid = false;
+            }
+
+            char *querySequence = seqDbr->getData(queryId, threadIdx);
+            size_t queryLength = seqDbr->getSeqLen(queryId);
+            query.mapSequence(queryId, queryKey, querySequence, queryLength);
+            blockAligner.initQuery(&query);
+            matcher.initQuery(&query);
+            
+            while (*alignmentData != '\0') {
+                hit_t hit = QueryMatcher::parsePrefilterHit(alignmentData);
+                const size_t targetId = seqDbr->getId(hit.seqId);
+                if (assignedCluster[targetId] == UINT_MAX) {
+                    targetsWithDiagonal.push_back(std::make_pair(hit.seqId, hit.diagonal));
+                }
+                alignmentData = Util::skipLine(alignmentData);
+            }
+
+            for (size_t targetIdx = 0; targetIdx < targetsWithDiagonal.size(); targetIdx++) {
+                const unsigned int targetKey = targetsWithDiagonal[targetIdx].first;
+                const unsigned short diagonal = targetsWithDiagonal[targetIdx].second;
+                const size_t targetId = seqDbr->getId(targetKey);
                 
-                // Initialize result buffer for this item
-                resultBuffer[bufferIdx].memberIds.clear();
-                resultBuffer[bufferIdx].isValid = false;
-                
-                dbKeysNdiagonal.clear();
-                
-                const unsigned int queryKey = seqDbr->getDbKey(i);
-                const size_t alnId = alnDbr.getId(queryKey);
-                char *data = alnDbr.getData(alnId, thread_idx);
-                size_t representative = seqDbr->getId(queryKey);
-                size_t queryId = representative;
-                
-                // Early skip if already assigned
-                if (assignedcluster[representative] != UINT_MAX) {
-                    resultBuffer[bufferIdx].memberIds.push_back(UINT_MAX); // Mark as already assigned
+                const bool isIdentity = (queryKey == targetKey);
+                if (isIdentity) {
+                    clusterResult.memberIds.push_back(queryId);
                     continue;
                 }
                 
-                // Mark as valid and add self-reference
-                resultBuffer[bufferIdx].isValid = true;
+                char *targetSequence = seqDbr->getData(targetId, threadIdx);
+                size_t targetLength = seqDbr->getSeqLen(targetId);
+                target.mapSequence(targetId, targetKey, targetSequence, targetLength);
+
+                BlockAligner::UngappedAln_res ungappedAlignment = blockAligner.ungappedAlign(&target, diagonal); 
                 
-                // Get query sequence
-                char* querySequence = seqDbr->getData(queryId, thread_idx);
-                size_t queryLen = seqDbr->getSeqLen(queryId);
-                query.mapSequence(queryId, queryKey, querySequence, queryLen);
-                blockaligner.initQuery(&query);
-                matcher.initQuery(&query);
+                bool hasEvalue = (ungappedAlignment.eval <= par.evalThr);
+                bool hasAlnLen = (ungappedAlignment.alnLen >= par.alnLenThr);
+                bool hasCoverage = Util::hasCoverage(par.covThr, par.covMode, ungappedAlignment.qcov, ungappedAlignment.tcov);
+                float seqId = 0;
                 
-                // Parse prefilter hits
-                while (*data != '\0') {
-                    hit_t result = QueryMatcher::parsePrefilterHit(data);
-                    const size_t targetId = seqDbr->getId(result.seqId);
-                    if (assignedcluster[targetId] == UINT_MAX) {
-                        dbKeysNdiagonal.push_back(std::make_pair(result.seqId, result.diagonal)); // query + 모든 targets
+                if (hasEvalue) {    
+                    int identicalCount = 0;
+                    for (int q = ungappedAlignment.qStart; q <= ungappedAlignment.qEnd; q++) {
+                        char queryLetter = querySequence[q] & static_cast<unsigned char>(~0x20);
+                        char targetLetter = targetSequence[ungappedAlignment.tStart + (q - ungappedAlignment.qStart)] & static_cast<unsigned char>(~0x20);
+                        identicalCount += (queryLetter == targetLetter) ? 1 : 0;
                     }
-                    data = Util::skipLine(data);
+                    seqId = Util::computeSeqId(par.seqIdMode, identicalCount, query.L, target.L, ungappedAlignment.alnLen);
+                }
+                
+                char *bufferEnd = Itoa::i32toa_sse2(ungappedAlignment.alnLen, buffer);
+                size_t bufferLen = bufferEnd - buffer;
+                std::string backtrace = "";
+                if (par.addBacktrace) {
+                    backtrace = std::string(buffer, bufferLen - 1);
+                    backtrace.push_back('M');
+                }
+                
+                if (isIdentity) {
+                    ungappedAlignment.qcov = 1.0f;
+                    ungappedAlignment.tcov = 1.0f;
+                    seqId = 1.0f;
+                }
+                
+                bool hasSeqId = seqId >= (par.seqIdThr - std::numeric_limits<float>::epsilon());
+                
+                if (isIdentity || (hasAlnLen && hasCoverage && hasSeqId && hasEvalue)) {
+                    Matcher::result_t result = Matcher::result_t(
+                        targetKey, ungappedAlignment.bitScore, ungappedAlignment.qcov, ungappedAlignment.tcov, 
+                        seqId, ungappedAlignment.eval, ungappedAlignment.alnLen,
+                        ungappedAlignment.qStart, ungappedAlignment.qEnd, query.L, 
+                        ungappedAlignment.tStart, ungappedAlignment.tEnd, target.L, backtrace
+                    );
+                    clusterResult.memberIds.push_back(targetId);
+                    continue;
+                }
+                
+                float currentScorePerCol = static_cast<float>(ungappedAlignment.score) / static_cast<float>(ungappedAlignment.diagonalLen);
+                if (currentScorePerCol < scorePerColThreshold) {
+                    continue;
+                }
+                
+                int alignmentLength = ungappedAlignment.alnLen;
+                int queryStartPos = ungappedAlignment.qStart;
+                int targetStartPos = ungappedAlignment.tStart;
+                int newQueryStartPos = queryStartPos;
+                int newTargetStartPos = targetStartPos;
+                
+                if (queryStartPos == -1 || targetStartPos == -1 || alignmentLength < 3) {
+                    continue;
                 }
 
-                // Process each target sequence
-                for (size_t id = 0; id < dbKeysNdiagonal.size(); id++) {
-                    const unsigned int targetKey = dbKeysNdiagonal[id].first;
-                    const unsigned short diagonal = dbKeysNdiagonal[id].second;
-                    const size_t targetId = seqDbr->getId(targetKey);
+                bool foundConsecutiveMatchSeed = false;
+                for (int blockIdx = 0; blockIdx <= alignmentLength - 3; ++blockIdx) {
+                    int queryPos = queryStartPos + blockIdx;
+                    int targetPos = targetStartPos + blockIdx;
                     
-                    // Skip identity matches
-                    const bool isIdentity = (queryKey == targetKey);
-                    if (isIdentity) {
-                        resultBuffer[bufferIdx].memberIds.push_back(queryId);
-                        continue;
-                    }
-                    
-                    char* targetSequence = seqDbr->getData(targetId, thread_idx);
-                    size_t targetLen = seqDbr->getSeqLen(targetId);
-                    target.mapSequence(targetId, targetKey, targetSequence, targetLen);
-
-                    // 1. Run ungapped alignment
-                    BlockAligner::UngappedAln_res ungapped_aln = blockaligner.ungappedAlign(&target, diagonal); 
-                    
-                    // Check ungapped criteria
-                    bool hasEvalue = (ungapped_aln.eval <= par.evalThr);
-                    bool hasAlnLen = (ungapped_aln.alnLen >= par.alnLenThr);
-                    bool hasCov = Util::hasCoverage(par.covThr, par.covMode, ungapped_aln.qcov, ungapped_aln.tcov);
-                    float seqId = 0;
-                    
-                    if (hasEvalue) {    
-                        int idCnt = 0;
-                        for (int q = ungapped_aln.qStart; q <= ungapped_aln.qEnd; q++) {
-                            char qLetter = querySequence[q] & static_cast<unsigned char>(~0x20);
-                            char tLetter = targetSequence[ungapped_aln.tStart + (q - ungapped_aln.qStart)] & static_cast<unsigned char>(~0x20);
-                            idCnt += (qLetter == tLetter) ? 1 : 0;
-                        }
-                        seqId = Util::computeSeqId(par.seqIdMode, idCnt, query.L, target.L, ungapped_aln.alnLen);
-                    }
-                    
-                    char *end = Itoa::i32toa_sse2(ungapped_aln.alnLen, buffer);
-                    size_t len = end - buffer;
-                    std::string backtrace = "";
-                    if (par.addBacktrace) {
-                        backtrace = std::string(buffer, len - 1);
-                        backtrace.push_back('M');
-                    }
-                    
-                    if (isIdentity) {
-                        ungapped_aln.qcov = 1.0f;
-                        ungapped_aln.tcov = 1.0f;
-                        seqId = 1.0f;
-                    }
-                    
-                    bool hasSeqId = seqId >= (par.seqIdThr - std::numeric_limits<float>::epsilon());
-                    
-                    // If ungapped alignment passes all criteria
-                    if (isIdentity || (hasAlnLen && hasCov && hasSeqId && hasEvalue)) {
-                        Matcher::result_t result;
-                        result = Matcher::result_t(targetKey, ungapped_aln.bitScore, ungapped_aln.qcov, ungapped_aln.tcov, seqId, ungapped_aln.eval, ungapped_aln.alnLen,
-                                                   ungapped_aln.qStart, ungapped_aln.qEnd, query.L, ungapped_aln.tStart, ungapped_aln.tEnd, target.L, backtrace);
-                        resultBuffer[bufferIdx].memberIds.push_back(targetId);
-                        continue;
-                    }
-                    
-                    // 2. Check if gapped alignment is needed
-                    float currScorePerCol = static_cast<float>(ungapped_aln.score) / static_cast<float>(ungapped_aln.diagonalLen);
-                    if (currScorePerCol < scorePerColThr) {
-                        continue;
-                    }
-                    
-                    // 3. Run gapped alignment
-                    int alnLen = ungapped_aln.alnLen;
-                    int qStartPos = ungapped_aln.qStart;
-                    int tStartPos = ungapped_aln.tStart;
-                    int new_qStartPos = qStartPos;
-                    int new_tStartPos = tStartPos;
-                    
-                    if (qStartPos == -1 || tStartPos == -1 || alnLen < 3) {
-                        continue;
-                    }
-
-                    // Find seed point (3 consecutive matches)
-                    bool foundConsecutiveMatchSeed = false;
-                    for (int blockIdx = 0; blockIdx <= alnLen - 3; ++blockIdx) {
-                        int qpos = qStartPos + blockIdx;
-                        int dbpos = tStartPos + blockIdx;
-                        
-                        if (querySequence[qpos] == targetSequence[dbpos] &&
-                            querySequence[qpos + 1] == targetSequence[dbpos + 1] &&
-                            querySequence[qpos + 2] == targetSequence[dbpos + 2]) {
-                            new_qStartPos = qpos + 1; 
-                            new_tStartPos = dbpos + 1;
-                            foundConsecutiveMatchSeed = true;
-                            break;
-                        }
-                    }
-                    
-                    if (foundConsecutiveMatchSeed) {
-                        std::string backtrace;
-                        // Option 1: block alignment (forward + backward)
-                        // s_align alignment = blockaligner.align(&target, new_qStartPos, new_tStartPos, backtrace, x_drop, par.covThr, par.covMode);
-                        // Option 2: banded alignment (bidirectional)
-                        s_align alignment = blockaligner.bandedalign(&target, new_qStartPos, new_tStartPos, backtrace, x_drop, par.covThr, par.covMode);
-                        unsigned int alnLength = backtrace.size();
-                        double seqId = Util::computeSeqId(par.seqIdMode, alignment.identicalAACnt, query.L, targetLen, alnLength);
-                        Matcher::result_t res = Matcher::result_t(targetKey, alignment.score1, alignment.qCov, alignment.tCov, seqId, alignment.evalue, alnLength,
-                                                    alignment.qStartPos1, alignment.qEndPos1, query.L, alignment.dbStartPos1, alignment.dbEndPos1, targetLen, backtrace);
-                        if (Alignment::checkCriteria(res, isIdentity, par.evalThr, par.seqIdThr, par.alnLenThr, par.covMode, par.covThr)) {
-                            resultBuffer[bufferIdx].memberIds.push_back(targetId);
-                        }
+                    if (querySequence[queryPos] == targetSequence[targetPos] &&
+                        querySequence[queryPos + 1] == targetSequence[targetPos + 1] &&
+                        querySequence[queryPos + 2] == targetSequence[targetPos + 2]) {
+                        newQueryStartPos = queryPos + 1; 
+                        newTargetStartPos = targetPos + 1;
+                        foundConsecutiveMatchSeed = true;
+                        break;
                     }
                 }
-            } // End of parallel for loop
-            
-            // Wait for all threads to complete their work
-#pragma omp barrier
-            
-            // Master thread applies results sequentially to maintain priority
-#pragma omp master
-            {   
-                std::vector<unsigned int> keys;
-                for (size_t c = 0; c < availChunkSize; ++c) {
-                    keys.clear();
-                    // Skip invalid or already processed items
-                    if (!resultBuffer[c].isValid) {
-                        continue;
-                    }
-                    unsigned int representative = resultBuffer[c].memberIds[0];
-                    if (resultBuffer[c].memberIds.size() <= 1 || assignedcluster[representative] != UINT_MAX) {
-                        continue;
-                    }
-                    // Assign all members to this cluster
-                    for (size_t id = 0; id < resultBuffer[c].memberIds.size(); id++) {
-                        unsigned int memberId = resultBuffer[c].memberIds[id];
-                        if (assignedcluster[memberId] == UINT_MAX) {
-                            keys.push_back(memberId);
-                        }
-                    }
-                    if (keys.size() <= 1) {
-                        continue;
-                    }
-                    // Assign cluster
-                    for (size_t id = 0; id < keys.size(); id++) {
-                        assignedcluster[keys[id]] = representative;
+                
+                if (foundConsecutiveMatchSeed) {
+                    std::string gappedBacktrace;
+                    s_align gappedAlignment = blockAligner.bandedalign(&target, newQueryStartPos, newTargetStartPos, 
+                                                                       gappedBacktrace, xDrop, par.covThr, par.covMode);
+                    unsigned int gappedAlnLength = gappedBacktrace.size();
+                    double gappedSeqId = Util::computeSeqId(par.seqIdMode, gappedAlignment.identicalAACnt, 
+                                                           query.L, targetLength, gappedAlnLength);
+                    Matcher::result_t result = Matcher::result_t(
+                        targetKey, gappedAlignment.score1, gappedAlignment.qCov, gappedAlignment.tCov, 
+                        gappedSeqId, gappedAlignment.evalue, gappedAlnLength,
+                        gappedAlignment.qStartPos1, gappedAlignment.qEndPos1, query.L, 
+                        gappedAlignment.dbStartPos1, gappedAlignment.dbEndPos1, targetLength, gappedBacktrace
+                    );
+                    if (Alignment::checkCriteria(result, isIdentity, par.evalThr, par.seqIdThr, 
+                                                par.alnLenThr, par.covMode, par.covThr)) {
+                        clusterResult.memberIds.push_back(targetId);
                     }
                 }
             }
             
-            // Wait for master to complete before moving to next chunk
-#pragma omp barrier
-        } // End of chunk loop
-    } // End of parallel region
-    
-    // Correct edges that are not assigned properly
-    for (size_t id = 0; id < dbSize; ++id) {
-        if (assignedcluster[id] == UINT_MAX) {
-            assignedcluster[id] = id;
+            bool isNextPosition = false;
+            {
+                std::lock_guard<std::mutex> lock(clusterMutex);
+                if (clusterResult.sequenceId == currentProcessPosition) {
+                    isNextPosition = true;
+                }
+                clusterResultQueue.push(std::move(clusterResult));
+            }
+            
+            if (isNextPosition) {
+                clusterCondition.notify_one();
+            }
         }
     }
     
-   
-    std::pair<unsigned int, unsigned int> * assignment = new std::pair<unsigned int, unsigned int> [dbSize];
+    {
+        std::lock_guard<std::mutex> lock(clusterMutex);
+        allCalculationsDone = true;
+    }
+    clusterCondition.notify_one();
+    
+    if (clusterThread.joinable()) {
+        clusterThread.join(); 
+    }
+    
+    for (size_t i = 0; i < dbSize; ++i) {
+        if (assignedCluster[i] == UINT_MAX) {
+            assignedCluster[i] = i;
+        }
+    }
+    
+    std::pair<unsigned int, unsigned int> *assignment = new std::pair<unsigned int, unsigned int>[dbSize];
+    
 #pragma omp parallel
     {
-
 #pragma omp for schedule(static)
         for (size_t i = 0; i < dbSize; i++) {
-            if (assignedcluster[i] == UINT_MAX) {
-                Debug(Debug::ERROR) << "there must be an error: "<< "\t" << i <<
-                                    "\tis not assigned to a cluster\n";
+            if (assignedCluster[i] == UINT_MAX) {
+                Debug(Debug::ERROR) << "There must be an error: " << i 
+                                    << " is not assigned to a cluster\n";
                 continue;
             }
 
-            assignment[i].first = seqDbr->getDbKey(assignedcluster[i]);
+            assignment[i].first = seqDbr->getDbKey(assignedCluster[i]);
             assignment[i].second = seqDbr->getDbKey(i);
         }
     }
-    SORT_PARALLEL(assignment,assignment+dbSize);
+    
+    SORT_PARALLEL(assignment, assignment + dbSize);
 
-    size_t cluNum = (dbSize > 0) ? 1 : 0; // gg // why?
-    for(size_t i = 1; i < dbSize; i++){
-        cluNum += (assignment[i].first != assignment[i-1].first);
+    size_t clusterCount = (dbSize > 0) ? 1 : 0;
+    for (size_t i = 1; i < dbSize; i++) {
+        clusterCount += (assignment[i].first != assignment[i - 1].first);
     }
 
     Debug(Debug::INFO) << "Size of the alignment database: " << dbSize << "\n";
-    Debug(Debug::INFO) << "Number of clusters: " << cluNum << "\n\n";
-    // write Data
+    Debug(Debug::INFO) << "Number of clusters: " << clusterCount << "\n\n";
+    
     writeData(&resultWriter, assignment, dbSize);
-    // Clean up (add your result writing code here)
-    delete[] assignedcluster;
+    
+    delete[] assignedCluster;
+    delete[] assignment;
+    delete[] fastMatrix.matrix;
+    delete[] fastMatrix.matrixData;
     delete subMat;
     seqDbr->close();
     delete seqDbr;
@@ -394,9 +438,12 @@ int doAlign2clust(Parameters &par,
 int alignblock(int argc, const char **argv, const Command &command) {
     Parameters &par = Parameters::getInstance();
     par.parseParameters(argc, argv, command, true, 0, 0);
+    
     Timer timer;
     timer.reset();
-    DBReader<unsigned int> alnDbr(par.db3.c_str(), par.db3Index.c_str(), par.threads, DBReader<unsigned int>::USE_INDEX|DBReader<unsigned int>::USE_DATA);
+    
+    DBReader<unsigned int> alnDbr(par.db3.c_str(), par.db3Index.c_str(), par.threads, 
+                                  DBReader<unsigned int>::USE_INDEX | DBReader<unsigned int>::USE_DATA);
     alnDbr.open(DBReader<unsigned int>::LINEAR_ACCCESS);
     int dbtype = alnDbr.getDbtype();
 
@@ -404,8 +451,11 @@ int alignblock(int argc, const char **argv, const Command &command) {
     resultWriter.open();
 
     int status = doAlign2clust(par, resultWriter, alnDbr, 0, alnDbr.getSize());
+    
     Debug(Debug::INFO) << "Time for run Align2Clust: " << timer.lap() << " sec\n";
+    
     resultWriter.close();
     alnDbr.close();
+    
     return status;
 }
