@@ -31,7 +31,7 @@ Sequence::Sequence(size_t maxLen, int seqType, const BaseMatrix *subMat, const u
     this->aaPosInSpacedPattern = NULL;
     this->shouldAddPC = shouldAddPC;
     this->userSpacedKmerPattern = userSpacedKmerPattern;
-    this->kmerPatternCount = 0;
+    this->kmerPatternCount = 1;
     if(spacedPatternSize){
         simdKmerRegisterCnt = (kmerSize / (VECSIZE_INT*4)) + 1;
         unsigned int simdKmerLen =  simdKmerRegisterCnt *  (VECSIZE_INT*4); // for SIMD memory alignment
@@ -115,9 +115,14 @@ bool Sequence::hasNextKmer() {
         resetCurrPos();
         this->kmerPatternCount--;
 
-        std::pair<const char *, unsigned int> spacedKmerInformation = getSpacedPattern(true, this->kmerSize);
-        this->spacedPattern = spacedKmerInformation.first;
-        this->spacedPatternSize = spacedKmerInformation.second;
+        char * pattern = new char[this->kmerSize + 1];
+        for(size_t i = 0; i <= this->kmerSize; i++){
+            pattern[i] = 1;
+        }
+        pattern[this->kmerSize/2] = 0;        
+
+        this->spacedPattern = const_cast<const char*>(pattern);
+        this->spacedPatternSize = this->kmerSize + 1;
 
         size_t pos = 0;
         for(int i = 0; i < this->spacedPatternSize; i++) {
