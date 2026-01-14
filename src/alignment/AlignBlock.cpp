@@ -27,17 +27,36 @@
 
 struct ClusterResult {
     unsigned int sequenceIdx;
-    size_t representativeId;
+    unsigned int representativeId;
     std::vector<unsigned int> memberIds;
 
     bool operator<(const ClusterResult& other) const {
-        return sequenceIdx > other.sequenceIdx;
+        if (memberIds.size() > other.memberIds.size()) {
+            return true;
+        }
+        if (other.memberIds.size() > memberIds.size()) {
+            return false;
+        }
+        if (representativeId < other.representativeId) {
+            return true;
+        }
+        if (other.representativeId < representativeId) {
+            return false;            
+        }
+        return true;
+    }
+};
+
+struct GreedyComparator {
+    bool operator()(const ClusterResult& a, const ClusterResult& b) const {
+        return a.sequenceIdx > b.sequenceIdx;
     }
 };
 
 static std::mutex clusterMutex;
 static std::condition_variable clusterCondition;
-static std::priority_queue<ClusterResult> clusterResultQueue;
+static std::priority_queue<ClusterResult, std::vector<ClusterResult>, GreedyComparator> clusterResultQueue;
+static std::unique_ptr<std::vector<ClusterResult>> elements;
 static unsigned int currentProcessPosition = 0; 
 static bool allCalculationsDone = false;
 
@@ -144,6 +163,43 @@ void clusterThreadFunc(unsigned int* assignedCluster) {
     }
 }
 
+static void decreaseSizeAndMove(
+    unsigned int targetRepId,
+    std::vector<ClusterResult>& elements,
+    std::vector<size_t>& posInElements,
+    std::vector<unsigned int>& sizes,
+    std::vector<ssize_t>& borders
+) {
+    size_t currIdx = posInElements[targetRepId];
+    unsigned int currentS = sizes[currIdx];
+
+    if (currentS <= 0) return;
+
+    size_t targetIdx = static_cast<size_t>(borders[currentS]);
+
+    if (currIdx != targetIdx) {
+        std::swap(elements[currIdx], elements[targetIdx]);
+        std::swap(sizes[currIdx], sizes[targetIdx]);
+
+        posInElements[elements[currIdx].representativeId] = currIdx;
+        posInElements[elements[targetIdx].representativeId] = targetIdx;
+    }
+
+    sizes[targetIdx]--; 
+    unsigned int newS = currentS - 1;
+
+    borders[currentS]--;
+    if (borders[currentS] < 0 || sizes[static_cast<size_t>(borders[currentS])] != currentS) {
+        borders[currentS] = -1;
+    }
+
+    if (newS > 0) {
+        if (borders[newS] == -1) {
+            borders[newS] = static_cast<ssize_t>(targetIdx);
+        }
+    }
+}
+
 int doAlign2clust(Parameters &par, DBWriter &resultWriter, DBReader<unsigned int> &alnDbr, 
                   const size_t dbFrom, const size_t dbSize) {
     DBReader<unsigned int> *seqDbr = new DBReader<unsigned int>(
@@ -175,8 +231,22 @@ int doAlign2clust(Parameters &par, DBWriter &resultWriter, DBReader<unsigned int
     Util::checkAllocation(assignedCluster, "Can not allocate assignedCluster memory in Align2Clust");
     std::fill_n(assignedCluster, dbSize, UINT_MAX);
 
-    std::thread clusterThread(clusterThreadFunc, assignedCluster);
+    std::unique_ptr<std::vector<ClusterResult>> elementsPtr;
+    std::vector<ClusterResult>* elements_ptr = nullptr; 
+    std::thread clusterThread;
+
+    int mode = par.clusteringMode;
+    if (mode == Parameters::GREEDY || mode == Parameters::GREEDY_MEM) {
+        clusterThread = std::thread(clusterThreadFunc, assignedCluster);
+    } else {
+        elementsPtr = std::make_unique<std::vector<ClusterResult>>(dbSize);
+        elements_ptr = elementsPtr.get();
+    }
+    std::vector<ClusterResult>& elements = (elements_ptr != nullptr) ? *elements_ptr : *(std::vector<ClusterResult>*)nullptr;
     
+    Timer timer;
+    timer.reset();
+
 #pragma omp parallel
     {
         unsigned int threadIdx = 0;
@@ -210,9 +280,12 @@ int doAlign2clust(Parameters &par, DBWriter &resultWriter, DBReader<unsigned int
             clusterResult.representativeId = representativeId;
             
             if (assignedCluster[representativeId] != UINT_MAX) {
-                {
+                if (mode == Parameters::GREEDY || mode == Parameters::GREEDY_MEM) {
                     std::lock_guard<std::mutex> lock(clusterMutex);
                     clusterResultQueue.push(std::move(clusterResult));
+                } else {
+                    elements[representativeId].representativeId = representativeId;
+                    elements[representativeId].memberIds = std::move(clusterResult.memberIds);
                 }
                 continue;
             }
@@ -340,32 +413,176 @@ int doAlign2clust(Parameters &par, DBWriter &resultWriter, DBReader<unsigned int
                     }
                 }
             }
-            
-            bool isNextPosition = false;
-            {
-                std::lock_guard<std::mutex> lock(clusterMutex);
-                if (clusterResult.sequenceIdx == currentProcessPosition) {
-                    isNextPosition = true;
+            if (mode == Parameters::GREEDY || mode == Parameters::GREEDY_MEM) {
+                bool isNextPosition = false;
+                {
+                    std::lock_guard<std::mutex> lock(clusterMutex);
+                    if (clusterResult.sequenceIdx == currentProcessPosition) {
+                        isNextPosition = true;
+                    }
+                    clusterResultQueue.push(std::move(clusterResult));
                 }
-                clusterResultQueue.push(std::move(clusterResult));
-            }
-            
-            if (isNextPosition) {
-                clusterCondition.notify_one();
+                
+                if (isNextPosition) {
+                    clusterCondition.notify_one();
+                }
+            } else {
+                elements[representativeId].representativeId = representativeId;
+                elements[representativeId].memberIds = std::move(clusterResult.memberIds);
             }
         }
     }
-    
-    {
-        std::lock_guard<std::mutex> lock(clusterMutex);
-        allCalculationsDone = true;
+
+    if (mode == Parameters::GREEDY || mode == Parameters::GREEDY_MEM) {
+        {
+            std::lock_guard<std::mutex> lock(clusterMutex);
+            allCalculationsDone = true;
+        }
+        clusterCondition.notify_one();
+        
+        if (clusterThread.joinable()) {
+            clusterThread.join(); 
+        }
+    } else {
+        Debug(Debug::INFO) << "Time for align: " << timer.lap() << "\n";
+        timer.reset();
+
+        for (size_t i = 0; i < dbSize; i++) {
+            if (elements[i].representativeId == UINT_MAX) {
+                elements[i].representativeId = static_cast<unsigned int>(i);
+            }
+            
+            std::vector<unsigned int> originalMems = elements[i].memberIds;
+            for (unsigned int memId : originalMems) {
+                if (memId < dbSize && memId != i) {
+                    elements[memId].memberIds.push_back(static_cast<unsigned int>(i));
+                }
+            }
+        }
+        Debug(Debug::INFO) << "Time for symmetry: " << timer.lap() << "\n";
+        timer.reset();
+        
+#pragma omp parallel for schedule(static)
+        for (size_t i = 0; i < dbSize; i++) {
+            if (elements[i].memberIds.empty() == false) {
+                std::sort(elements[i].memberIds.begin(), elements[i].memberIds.end());
+                elements[i].memberIds.erase(
+                    std::unique(elements[i].memberIds.begin(), elements[i].memberIds.end()), 
+                    elements[i].memberIds.end()
+                );
+            }
+        }
+        Debug(Debug::INFO) << "Time for unique sort: " << timer.lap() << "\n";
+        timer.reset();
+        std::sort(elements.begin(), elements.end());
+        Debug(Debug::INFO) << "Time for sort: " << timer.lap() << "\n";
+        timer.reset();
+
+        std::vector<size_t> posInElements(dbSize);
+        std::vector<unsigned int> sizes(dbSize);
+
+#pragma omp parallel for schedule(static)
+        for (size_t i = 0; i < dbSize; i++) {
+            posInElements[elements[i].representativeId] = i;
+            sizes[i] = static_cast<unsigned int>(elements[i].memberIds.size());
+        }
+
+        size_t maxSize = elements.empty() ? 0 : elements[0].memberIds.size();
+        std::vector<ssize_t> borders(maxSize + 1, -1);
+
+        if (maxSize > 0) {
+            size_t currentSize = maxSize;
+            for (size_t i = 0; i < dbSize; i++) {
+                size_t thisSize = elements[i].memberIds.size();
+
+                while (currentSize > thisSize) {
+                    if (i > 0) {
+                        borders[currentSize] = static_cast<ssize_t>(i - 1);
+                    }
+                    currentSize--;
+                }
+
+                if (i == dbSize - 1) {
+                    while (currentSize > 0) {
+                        if (currentSize <= thisSize) {
+                            borders[currentSize] = static_cast<ssize_t>(i);
+                        }
+                        currentSize--;
+                    }
+                }
+            }
+        }
+        Debug(Debug::INFO) << "Time for border: " << timer.lap() << "\n";
+        timer.reset();
+
+        std::vector<unsigned int> validMemberIds; 
+        validMemberIds.reserve(1024);
+
+        for (size_t i = 0; i < elements.size(); i++) {
+            const ClusterResult& res = elements[i];
+            
+            if (res.representativeId == UINT_MAX || assignedCluster[res.representativeId] != UINT_MAX) {
+                continue;
+            }
+
+            validMemberIds.clear();
+            for (unsigned int memId : res.memberIds) {
+                if (assignedCluster[memId] == UINT_MAX) {
+                    validMemberIds.push_back(memId);
+                }
+            }
+
+            // std::cout << i << "(" << res.representativeId << ") : " 
+            //             << validMemberIds.size() << " / " << res.memberIds.size() << std::endl;
+
+            if (validMemberIds.size() > 1) {
+                for (unsigned int memId : validMemberIds) {
+                    assignedCluster[memId] = res.representativeId;
+                }
+                for (unsigned int assignedMemId : validMemberIds) {
+                    const std::vector<unsigned int>& neighbors = elements[posInElements[assignedMemId]].memberIds;
+
+                    for (unsigned int neighborRepId : neighbors) {
+                        if (assignedCluster[neighborRepId] == UINT_MAX) {
+                            
+                            size_t currIdx = posInElements[neighborRepId];
+                            unsigned int currentS = sizes[currIdx];
+
+                            if (currentS == 0) continue;
+
+                            size_t targetIdx = static_cast<size_t>(borders[currentS]);
+
+                            if (currIdx != targetIdx) {
+                                std::swap(elements[currIdx], elements[targetIdx]);
+                                std::swap(sizes[currIdx], sizes[targetIdx]);
+
+                                posInElements[elements[currIdx].representativeId] = currIdx;
+                                posInElements[elements[targetIdx].representativeId] = targetIdx;
+                            }
+
+                            sizes[targetIdx]--; 
+                            unsigned int newS = currentS - 1;
+
+                            borders[currentS]--;
+                            if (borders[currentS] < 0 || sizes[borders[currentS]] != currentS) {
+                                borders[currentS] = -1;
+                            }
+
+                            if (newS > 0) {
+                                if (borders[newS] == -1) {
+                                    borders[newS] = static_cast<ssize_t>(targetIdx);
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                break;
+            }
+        }
+        Debug(Debug::INFO) << "Time for clust: " << timer.lap() << "\n\n";
+        timer.reset();
     }
-    clusterCondition.notify_one();
-    
-    if (clusterThread.joinable()) {
-        clusterThread.join(); 
-    }
-    
     for (size_t i = 0; i < dbSize; ++i) {
         if (assignedCluster[i] == UINT_MAX) {
             assignedCluster[i] = i;
