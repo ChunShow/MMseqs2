@@ -25,6 +25,24 @@
 #define MAX_SIZE 4096
 #define MIN_SIZE 32
 
+struct PrefInfo {
+    size_t id; // group id
+    size_t size; // number of sequences in the group
+
+    static bool compareBySizeAndId(const PrefInfo &first, const PrefInfo &second){
+        if(first.size > second.size)
+            return true;
+        if(second.size > first.size)
+            return false;
+        if(first.id < second.id)
+            return true;
+        if(second.id < first.id)
+            return false;
+        return false;
+    }
+};
+
+
 struct ClusterResult {
     unsigned int sequenceIdx;
     unsigned int representativeId;
@@ -196,7 +214,7 @@ void clusterThreadFunc(unsigned int* assignedCluster) {
             currentPrefSize = 0;
         }
 
-        while (!setCoverResultQueue.empty() && setCoverResultQueue.top().memberIds.size() >= currentPrefSize) {
+        while (!setCoverResultQueue.empty() && setCoverResultQueue.top().memberIds.size() > currentPrefSize) {
             ClusterResult result = std::move(const_cast<ClusterResult&>(setCoverResultQueue.top()));
             setCoverResultQueue.pop();
             
@@ -303,7 +321,42 @@ int doAlign2clust(Parameters &par, DBWriter &resultWriter, DBReader<unsigned int
     //     elements_ptr = elementsPtr.get();
     // }
     // std::vector<ClusterResult>& elements = (elements_ptr != nullptr) ? *elements_ptr : *(std::vector<ClusterResult>*)nullptr;
+    PrefInfo * prefRepSizePair = new(std::nothrow) PrefInfo[dbSize];
+    Util::checkAllocation(prefRepSizePair, "Can not allocate prefRepSizePair memory in ClusteringAlgorithms::execute");
+    #pragma omp parallel
+    {
+        int thread_idx = 0;
+#ifdef OPENMP
+        thread_idx = omp_get_thread_num();
+#endif
+#pragma omp for schedule(dynamic, 1000)
+        for (size_t i = 0; i < seqDbr->getSize(); i++) {
+            const unsigned int clusterId = seqDbr->getDbKey(i);
+            const size_t alnId = alnDbr.getId(clusterId);
+            const char *data = alnDbr.getData(alnId, thread_idx);
+            const size_t dataSize = alnDbr.getEntryLen(alnId);
+            // elementOffsets[i] = (*data == '\0') ? 1 : Util::countLines(data, dataSize);
+            prefRepSizePair[i].id = seqDbr->getId(clusterId);
+            prefRepSizePair[i].size = (*data == '\0') ? 1 : Util::countLines(data, dataSize);
+            if (seqDbr->getId(clusterId)!= i) {
+                Debug(Debug::ERROR) << "There is an error in the database keys.\n";
+            }
+        
+        }
+    }
 
+//     // make offset table
+//     AlignmentSymmetry::computeOffsetFromCounts(elementOffsets, dbSize);
+//     // set element edge pointers by using the offset table
+//     AlignmentSymmetry::setupPointers<unsigned int>(elements, elementLookupTable, elementOffsets, dbSize, elementCount);
+//     // fill elements
+//     AlignmentSymmetry::readInData(&alnDbr, seqDbr, elementLookupTable, NULL, 0, elementOffsets);
+//     Debug(Debug::INFO) << "Sort entries\n";
+//     AlignmentSymmetry::sortElements(elementLookupTable, elementOffsets, dbSize);
+    
+    // sort PrefInfo by size and id
+    SORT_PARALLEL(prefRepSizePair, prefRepSizePair + dbSize, PrefInfo::compareBySizeAndId);
+    
     Timer timer;
     timer.reset();
 
@@ -327,16 +380,16 @@ int doAlign2clust(Parameters &par, DBWriter &resultWriter, DBReader<unsigned int
         targetsWithDiagonal.reserve(1000);
 
 #pragma omp for schedule(dynamic, 1) nowait
-        for (size_t i = 0; i < alnDbr.getSize(); i++) {
+        for (size_t i = 0; i < dbSize; i++) { // or dbsize
             ClusterResult clusterResult;
-            clusterResult.sequenceIdx = i;
+            clusterResult.sequenceIdx = i; // junsu is it correct?
             targetsWithDiagonal.clear();
             
-            const unsigned int queryKey = seqDbr->getDbKey(i);
+            size_t representativeId = prefRepSizePair[i].id;
+            size_t queryId = representativeId;
+            const unsigned int queryKey = seqDbr->getDbKey(queryId);
             const size_t alignmentId = alnDbr.getId(queryKey);
             char *alignmentData = alnDbr.getData(alignmentId, threadIdx);
-            size_t representativeId = seqDbr->getId(queryKey);
-            size_t queryId = representativeId;
             clusterResult.representativeId = representativeId;
             
             // if (assignedCluster[representativeId] != UINT_MAX) {
@@ -360,9 +413,9 @@ int doAlign2clust(Parameters &par, DBWriter &resultWriter, DBReader<unsigned int
             while (*alignmentData != '\0') {
                 hit_t hit = QueryMatcher::parsePrefilterHit(alignmentData);
                 const size_t targetId = seqDbr->getId(hit.seqId);
-                if (assignedCluster[targetId] == UINT_MAX) {
+                // if (assignedCluster[targetId] == UINT_MAX) { // gyuri - query만 skip
                     targetsWithDiagonal.push_back(std::make_pair(hit.seqId, hit.diagonal));
-                }
+                // }
                 alignmentData = Util::skipLine(alignmentData);
                 prefSize++;
             }
