@@ -16,7 +16,6 @@ void setLinclustWorkflowDefaults(Parameters *p) {
     p->evalThr = 0.001;
     p->seqIdThr = 0.9;
     p->alignmentMode = Parameters::ALIGNMENT_MODE_SCORE_COV_SEQID; // use alignment mode 3 in linclust2
-    p->skipHamming = false;
     p->kmersPerSequenceScale = 0.05;
 }
 
@@ -103,7 +102,7 @@ int linclust(int argc, const char **argv, const Command& command) {
     
     cmd.addVariable("KMERMATCHER_PAR", par.createParameterString(par.kmermatcher).c_str());
     cmd.addVariable("VERBOSITY", par.createParameterString(par.onlyverbosity).c_str());
-    cmd.addVariable("ALIGNBLOCK_PAR", par.createParameterString(par.alignblock).c_str());
+    cmd.addVariable("ALIGN2CLUST_PAR", par.createParameterString(par.align2clust).c_str());
     cmd.addVariable("CLUSTER_PAR", par.createParameterString(par.clust).c_str());
     std::string program = tmpDir + "/linclust.sh";
     FileUtil::writeFile(program, linclust_sh, linclust_sh_len);

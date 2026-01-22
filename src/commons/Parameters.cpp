@@ -91,8 +91,6 @@ Parameters::Parameters():
         PARAM_GAP_PSEUDOCOUNT(PARAM_GAP_PSEUDOCOUNT_ID, "--gap-pc", "Gap pseudo count", "Pseudo count for calculating position-specific gap opening penalties", typeid(int), &gapPseudoCount, "^[0-9]+$", MMseqsParameter::COMMAND_ALIGN|MMseqsParameter::COMMAND_EXPERT),
 #endif
         PARAM_ZDROP(PARAM_ZDROP_ID, "--zdrop", "Zdrop", "Maximal allowed difference between score values before alignment is truncated  (nucleotide alignment only)", typeid(int), (void*) &zdrop, "^[0-9]{1}[0-9]*$", MMseqsParameter::COMMAND_ALIGN | MMseqsParameter::COMMAND_EXPERT),
-        // alignblock
-        PARAM_SKIP_HAMMING(PARAM_SKIP_HAMMING_ID, "--skip-hamming", "Disable hamming distance alignment", "Skip hamming distance based ungapped alignment in alignblock", typeid(bool), (void *) &skipHamming, "", MMseqsParameter::COMMAND_EXPERT),
         // clustering
         PARAM_CLUSTER_MODE(PARAM_CLUSTER_MODE_ID, "--cluster-mode", "Cluster mode", "0: Set-Cover (greedy)\n1: Connected component (BLASTclust)\n2,3: Greedy clustering by sequence length (CDHIT)\n4: Set-Cover (static)", typeid(int), (void *) &clusteringMode, "[0-4]{1}$", MMseqsParameter::COMMAND_CLUST),
         PARAM_CLUSTER_STEPS(PARAM_CLUSTER_STEPS_ID, "--cluster-steps", "Cascaded clustering steps", "Cascaded clustering steps from 1 to -s", typeid(int), (void *) &clusterSteps, "^[1-9]{1}$", MMseqsParameter::COMMAND_CLUST | MMseqsParameter::COMMAND_EXPERT),
@@ -167,9 +165,9 @@ Parameters::Parameters():
         PARAM_WEIGHT_FILE(PARAM_WEIGHT_FILE_ID, "--weights", "Weight file name", "Weights used for cluster priorization", typeid(std::string), (void*) &weightFile, "", MMseqsParameter::COMMAND_CLUSTLINEAR | MMseqsParameter::COMMAND_EXPERT ),
         PARAM_WEIGHT_THR(PARAM_WEIGHT_THR_ID, "--cluster-weight-threshold", "Cluster Weight threshold", "Weight threshold used for cluster priorization", typeid(float), (void*) &weightThr, "^[0-9]*(\\.[0-9]+)?$", MMseqsParameter::COMMAND_CLUSTLINEAR | MMseqsParameter::COMMAND_EXPERT ),
         PARAM_INCLUDE_COUNTTABLE(PARAM_INCLUDE_COUNTTABLE_ID, "--include-count-table", "Include count table", "Include counttable", typeid(bool), (void *) &includeCountTable, "", MMseqsParameter::COMMAND_CLUSTLINEAR | MMseqsParameter::COMMAND_EXPERT),
-        PARAM_NUM_COUNTS(PARAM_NUM_COUNTS_ID, "--num-count-table", "Number of count table based iteration", "Number of count table based iteration", typeid(int), (void *) &numIterCountTable, "^[1-9]{1}[0-9]*$", MMseqsParameter::COMMAND_CLUSTLINEAR | MMseqsParameter::COMMAND_EXPERT),
+        PARAM_NUM_COUNTS(PARAM_NUM_COUNTS_ID, "--num-count-table", "Number of count table based iteration", "Number of count table based iteration", typeid(int), (void *) &numIterCountTable, "^[0-9]{1}[0-9]*$", MMseqsParameter::COMMAND_CLUSTLINEAR | MMseqsParameter::COMMAND_EXPERT),
         PARAM_INCLUDE_ADJSEQ(PARAM_INCLUDE_ADJSEQ_ID, "--include-adj-seq", "Include adjacent sequences", "Include adjacent sequences", typeid(bool), (void *) &includeAdjacentSeq, "", MMseqsParameter::COMMAND_CLUSTLINEAR | MMseqsParameter::COMMAND_EXPERT),
-        PARAM_NUM_ADJSEQ(PARAM_NUM_ADJSEQ_ID, "--num-adj-seq", "Number of adjacent sequences based iteration", "Number of adjacent sequences based iteration", typeid(int), (void *) &numIterAdjacentSeq, "^[1-9]{1}[0-9]*$", MMseqsParameter::COMMAND_CLUSTLINEAR | MMseqsParameter::COMMAND_EXPERT),
+        PARAM_NUM_ADJSEQ(PARAM_NUM_ADJSEQ_ID, "--num-adj-seq", "Number of adjacent sequences based iteration", "Number of adjacent sequences based iteration", typeid(int), (void *) &numIterAdjacentSeq, "^[0-9]{1}[0-9]*$", MMseqsParameter::COMMAND_CLUSTLINEAR | MMseqsParameter::COMMAND_EXPERT),
         // workflow
         PARAM_RUNNER(PARAM_RUNNER_ID, "--mpi-runner", "MPI runner", "Use MPI on compute cluster with this MPI command (e.g. \"mpirun -np 42\")", typeid(std::string), (void *) &runner, "", MMseqsParameter::COMMAND_COMMON | MMseqsParameter::COMMAND_EXPERT),
         PARAM_REUSELATEST(PARAM_REUSELATEST_ID, "--force-reuse", "Force restart with latest tmp", "Reuse tmp filse in tmp/latest folder ignoring parameters and version changes", typeid(bool), (void *) &reuseLatest, "", MMseqsParameter::COMMAND_COMMON | MMseqsParameter::COMMAND_EXPERT),
@@ -437,24 +435,24 @@ Parameters::Parameters():
     align.push_back(&PARAM_COMPRESSED);
     align.push_back(&PARAM_V);
 
-    // alignblock
-    alignblock.push_back(&PARAM_SUB_MAT);
-    alignblock.push_back(&PARAM_ADD_BACKTRACE);
-    alignblock.push_back(&PARAM_ALIGNMENT_MODE);
-    alignblock.push_back(&PARAM_MIN_SEQ_ID);
-    alignblock.push_back(&PARAM_MIN_ALN_LEN);
-    alignblock.push_back(&PARAM_SEQ_ID_MODE);
-    alignblock.push_back(&PARAM_FILTER_HITS);
-    alignblock.push_back(&PARAM_E);
-    alignblock.push_back(&PARAM_C);
-    alignblock.push_back(&PARAM_COV_MODE);
-    alignblock.push_back(&PARAM_INCLUDE_IDENTITY);
-    alignblock.push_back(&PARAM_SORT_RESULTS);
-    alignblock.push_back(&PARAM_PRELOAD_MODE);
-    alignblock.push_back(&PARAM_SKIP_HAMMING);
-    alignblock.push_back(&PARAM_THREADS);
-    alignblock.push_back(&PARAM_COMPRESSED);
-    alignblock.push_back(&PARAM_V);
+    // align2clust
+    align2clust.push_back(&PARAM_SUB_MAT);
+    align2clust.push_back(&PARAM_ADD_BACKTRACE);
+    align2clust.push_back(&PARAM_ALIGNMENT_MODE);
+    align2clust.push_back(&PARAM_MIN_SEQ_ID);
+    align2clust.push_back(&PARAM_MIN_ALN_LEN);
+    align2clust.push_back(&PARAM_SEQ_ID_MODE);
+    align2clust.push_back(&PARAM_FILTER_HITS);
+    align2clust.push_back(&PARAM_E);
+    align2clust.push_back(&PARAM_C);
+    align2clust.push_back(&PARAM_COV_MODE);
+    align2clust.push_back(&PARAM_INCLUDE_IDENTITY);
+    align2clust.push_back(&PARAM_SORT_RESULTS);
+    align2clust.push_back(&PARAM_PRELOAD_MODE);
+    align2clust.push_back(&PARAM_THREADS);
+    align2clust.push_back(&PARAM_COMPRESSED);
+    align2clust.push_back(&PARAM_V);
+    align2clust.push_back(&PARAM_CLUSTER_MODE);
 
     // prefilter
     prefilter.push_back(&PARAM_SUB_MAT);
@@ -1456,7 +1454,7 @@ Parameters::Parameters():
     // linclust workflow
     linclustworkflow = combineList(clust, align);
     linclustworkflow = combineList(linclustworkflow, kmermatcher);
-    linclustworkflow = combineList(linclustworkflow, alignblock);
+    linclustworkflow = combineList(linclustworkflow, align2clust);
     linclustworkflow.push_back(&PARAM_REMOVE_TMP_FILES);
     linclustworkflow.push_back(&PARAM_REUSELATEST);
     linclustworkflow.push_back(&PARAM_RUNNER);
@@ -2510,7 +2508,6 @@ void Parameters::setDefaults() {
     gapPseudoCount = 10;
 #endif
     zdrop = 40;
-    skipHamming = false;
     addBacktrace = false;
     realign = false;
     clusteringMode = SET_COVER;
@@ -2723,7 +2720,7 @@ void Parameters::setDefaults() {
     numIterCountTable = 2;
     countTableScale = 0.1;
     includeAdjacentSeq = true;
-    numIterAdjacentSeq = 3;
+    numIterAdjacentSeq = 2;
 
     // result2stats
     stat = "";

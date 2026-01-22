@@ -673,7 +673,7 @@ std::vector<Command> baseCommands = {
                                                         {"prefDB", DbType::ACCESS_MODE_INPUT, DbType::NEED_DATA, &DbValidator::resultDb },
                                                            {"resultDB", DbType::ACCESS_MODE_INPUT, DbType::NEED_DATA, &DbValidator::resultDb },
                                                            {"alignmentDB", DbType::ACCESS_MODE_OUTPUT, DbType::NEED_DATA, &DbValidator::alignmentDb }}},
-        {"alignblock",             alignblock,             &par.alignblock,             COMMAND_ALIGNMENT,
+        {"align2clust",             align2clust,             &par.align2clust,             COMMAND_ALIGNMENT,
                 "Fast alignment ",
                 NULL,
                 "Martin Steinegger <martin.steinegger@snu.ac.kr>",

@@ -89,12 +89,13 @@ struct __attribute__((__packed__))KmerPosition : public AdjacentSeqArray<Include
             return true;
         if(second.kmer < first.kmer )
             return false;
-
-        T len1 = seqkey_to_len[first.id];
-        T len2 = seqkey_to_len[second.id];
-    
-        if (len1 > len2) return true;   
-        if (len2 > len1) return false;
+        if (first.id != SIZE_T_MAX && second.id != SIZE_T_MAX) {
+            T len1 = seqkey_to_len[first.id];
+            T len2 = seqkey_to_len[second.id];
+        
+            if (len1 > len2) return true;   
+            if (len2 > len1) return false;
+        }
         
         if(first.id < second.id )
             return true;
@@ -115,11 +116,13 @@ struct __attribute__((__packed__))KmerPosition : public AdjacentSeqArray<Include
         if(secondKmer < firstKmer )
             return false;
 
-        size_t len1 = seqkey_to_len[first.id];
-        size_t len2 = seqkey_to_len[second.id];
-    
-        if (len1 > len2) return true;   
-        if (len2 > len1) return false;
+        if (first.id != SIZE_T_MAX && second.id != SIZE_T_MAX) {
+            T len1 = seqkey_to_len[first.id];
+            T len2 = seqkey_to_len[second.id];
+        
+            if (len1 > len2) return true;   
+            if (len2 > len1) return false;
+        }
         
         if(first.id < second.id )
             return true;
@@ -221,6 +224,14 @@ public:
         if(first.pos > second.pos )
             return true;
         if(second.pos > first.pos )
+            return false;
+        if(first.score > second.score)
+            return true;
+        if(second.score > first.score)
+            return false;
+        if(first.file > second.file)
+            return true;
+        if(second.file > first.file)
             return false;
         return false;
     }

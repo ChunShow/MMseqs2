@@ -29,16 +29,8 @@ RESULTDB="${TMP_PATH}/pref"
 # 2. Ungapped and gapped alignment(w/ banded-block aligner)
 if notExists "${TMP_PATH}/aln.dbtype"; then
     # shellcheck disable=SC2086
-    $RUNNER "$MMSEQS" alignblock "$INPUT" "$INPUT" "$RESULTDB" "${TMP_PATH}/aln" ${ALIGNBLOCK_PAR} \
-        || fail "alignblock step died"
-fi
-RESULTDB="${TMP_PATH}/aln"
-
-# 3. Clustering 
-if notExists "${TMP_PATH}/clust.dbtype"; then
-    # shellcheck disable=SC2086
-    "$MMSEQS" clust "$INPUT" "$RESULTDB" "$2" ${CLUSTER_PAR} \
-        || fail "Clustering step died"
+    $RUNNER "$MMSEQS" align2clust "$INPUT" "$INPUT" "$RESULTDB" "$2" ${ALIGN2CLUST_PAR} \
+        || fail "align2clust step died"
 fi
 
 if [ -n "$REMOVE_TMP" ]; then

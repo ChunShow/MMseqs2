@@ -469,7 +469,6 @@ public:
     int    gapPseudoCount;               // for calculation of position-specific gap opening penalties
 #endif
     int    zdrop;                        // zdrop
-    bool   skipHamming;
     // workflow
     std::string runner;
     bool reuseLatest;
@@ -854,9 +853,6 @@ public:
 #endif
     PARAMETER(PARAM_ZDROP)
 
-    //alginblock
-    PARAMETER(PARAM_SKIP_HAMMING)
-
     // clustering
     PARAMETER(PARAM_CLUSTER_MODE)
     PARAMETER(PARAM_CLUSTER_STEPS)
@@ -1181,7 +1177,7 @@ public:
 
     std::vector<MMseqsParameter*> alignall;
     std::vector<MMseqsParameter*> align;
-    std::vector<MMseqsParameter*> alignblock;
+    std::vector<MMseqsParameter*> align2clust;
     std::vector<MMseqsParameter*> rescorediagonal;
     std::vector<MMseqsParameter*> alignbykmer;
     std::vector<MMseqsParameter*> createFasta;
