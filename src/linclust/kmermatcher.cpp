@@ -719,7 +719,6 @@ std::pair<size_t, size_t> fillKmerPositionArray(KmerPosition<T, IncludeAdjacentS
             delete generator;
         }
     }
-    std::cout << "fillKmerPositionArray total offset=" << offset << std::endl;
     if (TYPE == Parameters::DBTYPE_HMM_PROFILE) {
         ExtendedSubstitutionMatrix::freeScoreMatrix(three);
         ExtendedSubstitutionMatrix::freeScoreMatrix(two);
