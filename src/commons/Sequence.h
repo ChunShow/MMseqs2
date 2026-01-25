@@ -89,7 +89,9 @@ public:
     void mapProfile(const char *profileData, unsigned int seqLen);
 
     // checks if there is still a k-mer left
-    bool hasNextKmer();
+    bool hasNextKmer() {
+        return (((currItPos + 1) + this->spacedPatternSize) <= this->L);
+    }
 
     // k-mer contains x, is only field aftter nextKmer
     inline bool kmerContainsX(){
@@ -584,8 +586,5 @@ private:
 
     // user kmer pattern
     std::string userSpacedKmerPattern;
-
-    // number of k-mer patterns currently in use
-    unsigned int kmerPatternCount;
 };
 #endif

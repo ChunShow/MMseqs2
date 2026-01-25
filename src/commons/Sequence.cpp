@@ -31,7 +31,6 @@ Sequence::Sequence(size_t maxLen, int seqType, const BaseMatrix *subMat, const u
     this->aaPosInSpacedPattern = NULL;
     this->shouldAddPC = shouldAddPC;
     this->userSpacedKmerPattern = userSpacedKmerPattern;
-    this->kmerPatternCount = 1;
     if(spacedPatternSize){
         simdKmerRegisterCnt = (kmerSize / (VECSIZE_INT*4)) + 1;
         unsigned int simdKmerLen =  simdKmerRegisterCnt *  (VECSIZE_INT*4); // for SIMD memory alignment
@@ -109,48 +108,6 @@ Sequence::~Sequence() {
     }
 }
 
-bool Sequence::hasNextKmer() {
-    bool hasNext = ((currItPos + 1) + this->spacedPatternSize) <= this->L;
-    if (hasNext == false && this->kmerPatternCount > 0) {
-        resetCurrPos();
-        this->kmerPatternCount--;
-
-        char * pattern = new char[this->kmerSize + 1];
-        for(size_t i = 0; i <= this->kmerSize; i++){
-            pattern[i] = 1;
-        }
-        pattern[this->kmerSize/2] = 0;        
-
-        this->spacedPattern = const_cast<const char*>(pattern);
-        this->spacedPatternSize = this->kmerSize + 1;
-
-        size_t pos = 0;
-        for(int i = 0; i < this->spacedPatternSize; i++) {
-            if(spacedPattern[i]){
-                aaPosInSpacedPattern[pos] = i;
-                pos++;
-            }
-        }
-        hasNext = ((currItPos + 1) + this->spacedPatternSize) <= this->L;
-    }
-    return hasNext;
-}
-
-// bool Sequence::hasNextSpacedKmer() {
-//     std::pair<const char *, unsigned int> spacedKmerInformation = getSpacedPattern(true, this->kmerSize);
-//     this->spacedPattern = spacedKmerInformation.first;
-//     this->spacedPatternSize = spacedKmerInformation.second;
-
-//     size_t pos = 0;
-//     for(int i = 0; i < this->spacedPatternSize; i++) {
-//         if(spacedPattern[i]){
-//             aaPosInSpacedPattern[pos] = i;
-//             pos++;
-//         }
-//     }
-//      bool hasNext = ((currItPos + 1) + this->spacedPatternSize) <= this->L;
-//     return hasNext;
-// }
 std::pair<const char *, unsigned int> Sequence::getSpacedPattern(bool spaced, unsigned int kmerSize){
 #define CASE(x) {case x: \
                       if(spaced){ \

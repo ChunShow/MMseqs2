@@ -16,7 +16,6 @@ void setLinclustWorkflowDefaults(Parameters *p) {
     p->evalThr = 0.001;
     p->seqIdThr = 0.9;
     p->alignmentMode = Parameters::ALIGNMENT_MODE_SCORE_COV_SEQID; // use alignment mode 3 in linclust2
-    p->kmersPerSequenceScale = 0.05;
 }
 
 int linclust(int argc, const char **argv, const Command& command) {

@@ -160,88 +160,146 @@ static void writeData(DBWriter *dbWriter, const std::pair<unsigned int, unsigned
 
 static void (*clusterThreadFunc)(unsigned int*) = nullptr;
 
+// void clusterThreadFuncSetcover(unsigned int* assignedCluster) {
+//     while (true) {
+//         std::unique_lock<std::mutex> lock(clusterMutex);
+
+//         clusterCondition.wait(lock, [] {
+//             return ((!clusterResultQueue.empty() &&
+//                      clusterResultQueue.top().sequenceIdx == currentProcessPosition) ||
+//                     allCalculationsDone);
+//         });
+
+//         // 1) clusterResultQueue에서 순서대로 결과를 가져와 setCoverReadyQueue로 이동
+//         while (!clusterResultQueue.empty() &&
+//                clusterResultQueue.top().sequenceIdx == currentProcessPosition) {
+
+//             ClusterResult result = clusterResultQueue.top();
+//             clusterResultQueue.pop();
+
+//             currentProcessPosition++;
+//             currentPrefSize = result.prefSize;
+
+//             if (!result.memberIds.empty()) {
+//                 result.revalidated = false; // 새로 들어오는 건 1단계부터
+//                 setCoverReadyQueue.push(std::move(result));
+//             }
+//         }
+
+//         // 2) setCoverReadyQueue 처리 (2-phase)
+//         while (!setCoverReadyQueue.empty() &&
+//                (allCalculationsDone ||
+//                 setCoverReadyQueue.top().memberIds.size() > currentPrefSize)) {
+
+//             ClusterResult res = setCoverReadyQueue.top();
+//             setCoverReadyQueue.pop();
+
+//             // 대표가 이미 확정(배정)됐으면 스킵
+//             if (assignedCluster[res.representativeId] != UINT_MAX) {
+//                 continue;
+//             }
+
+//             if (!res.revalidated) {
+//                 // ---- Phase 1: 현재 assignedCluster로 memberIds 재필터링 후 재삽입 ----
+//                 std::vector<unsigned int> valid;
+//                 valid.reserve(res.memberIds.size());
+
+//                 for (unsigned int mem : res.memberIds) {
+//                     if (assignedCluster[mem] == UINT_MAX) {
+//                         valid.push_back(mem);
+//                     }
+//                 }
+
+//                 // 2명 미만이면 의미 없으니 버림
+//                 if (valid.size() <= 1) {
+//                     continue;
+//                 }
+
+//                 res.memberIds = std::move(valid);
+//                 res.revalidated = true;
+
+//                 // 다시 큐에 넣고, 확정은 "다음에" res가 top으로 다시 올라왔을 때 수행
+//                 setCoverReadyQueue.push(std::move(res));
+//                 continue;
+//             }
+
+//             // ---- Phase 2: revalidated 상태로 다시 top까지 올라왔으면 확정 ----
+//             // (안전장치) 실제 할당 직전 멤버별로 한 번 더 체크
+//             if (res.memberIds.size() > 1) {
+//                 for (unsigned int mem : res.memberIds) {
+//                     if (assignedCluster[mem] == UINT_MAX) {
+//                         assignedCluster[mem] = res.representativeId;
+//                     }
+//                 }
+//             }
+//         }
+
+//         // 3) 종료 조건
+//         if (allCalculationsDone &&
+//             clusterResultQueue.empty() &&
+//             setCoverReadyQueue.empty()) {
+//             break;
+//         }
+//     }
+// }
+
+
 void clusterThreadFuncSetcover(unsigned int* assignedCluster) {
     while (true) {
         std::unique_lock<std::mutex> lock(clusterMutex);
-
+        
         clusterCondition.wait(lock, [] {
-            return ((!clusterResultQueue.empty() &&
-                     clusterResultQueue.top().sequenceIdx == currentProcessPosition) ||
-                    allCalculationsDone);
+            return (!clusterResultQueue.empty() &&
+                    clusterResultQueue.top().sequenceIdx == currentProcessPosition)
+                   || allCalculationsDone;
         });
-
-        // 1) clusterResultQueue에서 순서대로 결과를 가져와 setCoverReadyQueue로 이동
+        
         while (!clusterResultQueue.empty() &&
                clusterResultQueue.top().sequenceIdx == currentProcessPosition) {
-
-            ClusterResult result = clusterResultQueue.top();
+            ClusterResult result = clusterResultQueue.top(); 
             clusterResultQueue.pop();
-
             currentProcessPosition++;
+            
             currentPrefSize = result.prefSize;
-
-            if (!result.memberIds.empty()) {
-                result.revalidated = false; // 새로 들어오는 건 1단계부터
+            
+            if (result.memberIds.size() > 0) {
                 setCoverReadyQueue.push(std::move(result));
             }
         }
-
-        // 2) setCoverReadyQueue 처리 (2-phase)
+        
         while (!setCoverReadyQueue.empty() &&
-               (allCalculationsDone ||
+               (allCalculationsDone || 
                 setCoverReadyQueue.top().memberIds.size() > currentPrefSize)) {
-
             ClusterResult res = setCoverReadyQueue.top();
             setCoverReadyQueue.pop();
-
-            // 대표가 이미 확정(배정)됐으면 스킵
+            
             if (assignedCluster[res.representativeId] != UINT_MAX) {
                 continue;
             }
 
-            if (!res.revalidated) {
-                // ---- Phase 1: 현재 assignedCluster로 memberIds 재필터링 후 재삽입 ----
-                std::vector<unsigned int> valid;
-                valid.reserve(res.memberIds.size());
-
-                for (unsigned int mem : res.memberIds) {
-                    if (assignedCluster[mem] == UINT_MAX) {
-                        valid.push_back(mem);
-                    }
+            std::vector<unsigned int> valid;
+            valid.reserve(res.memberIds.size());
+            for (unsigned int mem : res.memberIds) {
+                if (assignedCluster[mem] == UINT_MAX) {
+                    valid.push_back(mem);
                 }
-
-                // 2명 미만이면 의미 없으니 버림
-                if (valid.size() <= 1) {
-                    continue;
-                }
-
-                res.memberIds = std::move(valid);
-                res.revalidated = true;
-
-                // 다시 큐에 넣고, 확정은 "다음에" res가 top으로 다시 올라왔을 때 수행
-                setCoverReadyQueue.push(std::move(res));
-                continue;
             }
-
-            // ---- Phase 2: revalidated 상태로 다시 top까지 올라왔으면 확정 ----
-            // (안전장치) 실제 할당 직전 멤버별로 한 번 더 체크
-            if (res.memberIds.size() > 1) {
-                for (unsigned int mem : res.memberIds) {
-                    if (assignedCluster[mem] == UINT_MAX) {
-                        assignedCluster[mem] = res.representativeId;
-                    }
+            
+            if (valid.size() > 1) {
+                for (unsigned int mem : valid) {
+                    assignedCluster[mem] = res.representativeId;
                 }
             }
         }
-
-        // 3) 종료 조건
-        if (allCalculationsDone &&
-            clusterResultQueue.empty() &&
+        
+        if (allCalculationsDone && 
+            clusterResultQueue.empty() && 
             setCoverReadyQueue.empty()) {
             break;
         }
     }
 }
+
 
 void clusterThreadFuncGreedy(unsigned int* assignedCluster) {
     while (true) {
@@ -423,12 +481,12 @@ int doAlign2clust(Parameters &par, DBWriter &resultWriter, DBReader<unsigned int
             unsigned int prefSize = 0;
             while (*alignmentData != '\0') {
                 hit_t hit = QueryMatcher::parsePrefilterHit(alignmentData);
-                // const size_t targetId = seqDbr->getId(hit.seqId);
+                const size_t targetId = seqDbr->getId(hit.seqId);
                 
                 if (mode == Parameters::GREEDY || mode == Parameters::GREEDY_MEM) {
-                    // if (assignedCluster[targetId] == UINT_MAX) { 
+                    if (assignedCluster[targetId] == UINT_MAX) { 
                         targetsWithDiagonal.push_back(std::make_pair(hit.seqId, hit.diagonal));
-                    // }
+                    }
                 } else { // SET_COVER_STATIC
                     targetsWithDiagonal.push_back(std::make_pair(hit.seqId, hit.diagonal));
                 }
@@ -485,7 +543,7 @@ int doAlign2clust(Parameters &par, DBWriter &resultWriter, DBReader<unsigned int
                 
                 bool hasSeqId = seqId >= (par.seqIdThr - std::numeric_limits<float>::epsilon());
                 //ugly temporary gyuri
-                if (assignedCluster[targetId] != UINT_MAX) continue;
+                // if (assignedCluster[targetId] != UINT_MAX) continue;
 
                 if (isIdentity || (hasAlnLen && hasCoverage && hasSeqId && hasEvalue)) {
                     Matcher::result_t result = Matcher::result_t(
@@ -514,7 +572,7 @@ int doAlign2clust(Parameters &par, DBWriter &resultWriter, DBReader<unsigned int
                 }
 
                 //ugly temporary gyuri
-                if (assignedCluster[targetId] != UINT_MAX) continue;
+                // if (assignedCluster[targetId] != UINT_MAX) continue;
 
                 bool foundConsecutiveMatchSeed = false;
                 for (int blockIdx = 0; blockIdx <= alignmentLength - 3; ++blockIdx) {
