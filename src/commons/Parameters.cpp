@@ -168,6 +168,7 @@ Parameters::Parameters():
         PARAM_NUM_COUNTS(PARAM_NUM_COUNTS_ID, "--num-count-table", "Number of count table based iteration", "Number of count table based iteration", typeid(int), (void *) &numIterCountTable, "^[0-9]{1}[0-9]*$", MMseqsParameter::COMMAND_CLUSTLINEAR | MMseqsParameter::COMMAND_EXPERT),
         PARAM_INCLUDE_ADJSEQ(PARAM_INCLUDE_ADJSEQ_ID, "--include-adj-seq", "Include adjacent sequences", "Include adjacent sequences", typeid(bool), (void *) &includeAdjacentSeq, "", MMseqsParameter::COMMAND_CLUSTLINEAR | MMseqsParameter::COMMAND_EXPERT),
         PARAM_NUM_ADJSEQ(PARAM_NUM_ADJSEQ_ID, "--num-adj-seq", "Number of adjacent sequences based iteration", "Number of adjacent sequences based iteration", typeid(int), (void *) &numIterAdjacentSeq, "^[0-9]{1}[0-9]*$", MMseqsParameter::COMMAND_CLUSTLINEAR | MMseqsParameter::COMMAND_EXPERT),
+        PARAM_LINCLUST_VERSION(PARAM_LINCLUST_VERSION_ID, "--linclust-version", "Linclust version", "Linclust version: 1: Linclust1, 2: Linclust2", typeid(int), (void *) &linclustVersion, "^[1-2]{2}$", MMseqsParameter::COMMAND_CLUSTLINEAR | MMseqsParameter::COMMAND_EXPERT),
         // workflow
         PARAM_RUNNER(PARAM_RUNNER_ID, "--mpi-runner", "MPI runner", "Use MPI on compute cluster with this MPI command (e.g. \"mpirun -np 42\")", typeid(std::string), (void *) &runner, "", MMseqsParameter::COMMAND_COMMON | MMseqsParameter::COMMAND_EXPERT),
         PARAM_REUSELATEST(PARAM_REUSELATEST_ID, "--force-reuse", "Force restart with latest tmp", "Reuse tmp filse in tmp/latest folder ignoring parameters and version changes", typeid(bool), (void *) &reuseLatest, "", MMseqsParameter::COMMAND_COMMON | MMseqsParameter::COMMAND_EXPERT),
@@ -1458,6 +1459,7 @@ Parameters::Parameters():
     linclustworkflow.push_back(&PARAM_REMOVE_TMP_FILES);
     linclustworkflow.push_back(&PARAM_REUSELATEST);
     linclustworkflow.push_back(&PARAM_RUNNER);
+    linclustworkflow.push_back(&PARAM_LINCLUST_VERSION);
 
     // easylinclustworkflow
     easylinclustworkflow = combineList(linclustworkflow, createdb);
@@ -2721,6 +2723,7 @@ void Parameters::setDefaults() {
     countTableScale = 0.1;
     includeAdjacentSeq = true;
     numIterAdjacentSeq = 2;
+    linclustVersion = 2;
 
     // result2stats
     stat = "";

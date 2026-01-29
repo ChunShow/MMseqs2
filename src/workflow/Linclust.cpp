@@ -44,7 +44,11 @@ int linclust(int argc, const char **argv, const Command& command) {
     CommandCaller cmd;
     cmd.addVariable("REMOVE_TMP", par.removeTmpFiles ? "TRUE" : NULL);
     cmd.addVariable("RUNNER", par.runner.c_str());
-
+    if (par.linclustVersion == 1) {
+        cmd.addVariable("LINCLUST_MODULE", "linclust1");
+    } else if (par.linclustVersion == 2) {
+        cmd.addVariable("LINCLUST_MODULE", "linclust2");
+    }
     // # 1. Finding exact $k$-mer matches.
     bool kmerSizeWasSet = false;
     bool alphabetSizeWasSet = false;

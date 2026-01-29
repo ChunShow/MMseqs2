@@ -1662,8 +1662,8 @@ int kmermatcherInner(Parameters& par, DBReader<unsigned int>& seqDbr) {
             }
         }
     }
-    // dbw.close(false, false); 
-    dbw.close(true, true); // gyuri tmp
+    dbw.close(false, false); 
+
 
     // free memory
     delete subMat;

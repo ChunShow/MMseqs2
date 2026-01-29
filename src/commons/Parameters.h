@@ -586,6 +586,7 @@ public:
     bool includeAdjacentSeq;
     int numIterAdjacentSeq;
     float extraMemoryScale;
+    int linclustVersion;
 
     // indexdb
     int checkCompatible;
@@ -940,6 +941,7 @@ public:
     PARAMETER(PARAM_NUM_COUNTS)
     PARAMETER(PARAM_INCLUDE_ADJSEQ)
     PARAMETER(PARAM_NUM_ADJSEQ)
+    PARAMETER(PARAM_LINCLUST_VERSION)
 
     // workflow
     PARAMETER(PARAM_RUNNER)
