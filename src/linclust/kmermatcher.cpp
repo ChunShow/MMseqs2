@@ -1875,6 +1875,7 @@ void writeKmerMatcherResult(DBWriter & dbw,
             // compute best diagonal and score for every group of target sequences
             while(lastTargetId != targetId
                   && kmerPos+kmerOffset < threadOffsets[thread+1]
+                  && hashSeqPair[kmerPos+kmerOffset].kmer == repSeqId
                   && hashSeqPair[kmerPos+kmerOffset].id == targetId){
                 if(prevDiagonal == hashSeqPair[kmerPos+kmerOffset].pos){
                     diagonalCnt++;
@@ -2154,7 +2155,7 @@ void writeKmersToDisk(std::string tmpFile, KmerPosition<seqLenType, false> *hash
                 reverse += isReverse == true;
             }
             kmerPos++;
-        }while(targetId == hashSeqPair[kmerPos].id && hashSeqPair[kmerPos].pos == diagonal && kmerPos < totalKmers && hashSeqPair[kmerPos].kmer != SIZE_T_MAX);
+        }while(repSeqId == hashSeqPair[kmerPos].kmer && targetId == hashSeqPair[kmerPos].id && hashSeqPair[kmerPos].pos == diagonal && kmerPos < totalKmers && hashSeqPair[kmerPos].kmer != SIZE_T_MAX);
         kmerPos--;
 
         elemenetCnt++;
